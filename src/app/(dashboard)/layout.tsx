@@ -67,7 +67,7 @@ export default function DashboardLayout({
 
   return (
     <SidebarProvider>
-      <Sidebar className="border-r border-sidebar-border">
+      <Sidebar className="border-r border-sidebar-border overflow-x-hidden">
         <SidebarHeader className="p-4">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
@@ -81,7 +81,9 @@ export default function DashboardLayout({
             </div>
           </div>
         </SidebarHeader>
-        <Separator className="mx-4 w-auto" />
+        <div className="px-4 min-w-0">
+          <Separator />
+        </div>
         <SidebarContent>
           <SidebarGroup>
             <SidebarGroupLabel className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2">
