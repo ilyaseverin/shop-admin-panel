@@ -38,9 +38,9 @@ export function DeleteDialog({
         <AlertDialogFooter>
           <AlertDialogCancel disabled={loading}>Отмена</AlertDialogCancel>
           <AlertDialogAction
+            variant="destructive"
             onClick={onConfirm}
             disabled={loading}
-            className="bg-destructive text-white hover:bg-destructive/90"
           >
             {loading ? "Удаление..." : "Удалить"}
           </AlertDialogAction>
