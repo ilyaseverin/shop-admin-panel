@@ -28,7 +28,7 @@ async function refreshTokens(): Promise<boolean> {
 
 async function fetchWithAuth(
   url: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
 ): Promise<Response> {
   const tokens = getTokens();
   const headers: Record<string, string> = {
@@ -39,10 +39,7 @@ async function fetchWithAuth(
     headers["Authorization"] = `Bearer ${tokens.accessToken}`;
   }
 
-  if (
-    !(options.body instanceof FormData) &&
-    !headers["Content-Type"]
-  ) {
+  if (!(options.body instanceof FormData) && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
 
@@ -86,7 +83,7 @@ export async function getCategories(params?: {
   if (params?.name) query.set("name", params.name);
 
   const res = await fetchWithAuth(
-    `${CATALOG_PROXY}/categories?${query.toString()}`
+    `${CATALOG_PROXY}/categories?${query.toString()}`,
   );
   if (!res.ok) throw new Error("Ошибка загрузки категорий");
   return res.json();
@@ -117,7 +114,7 @@ export async function updateCategory(
     description?: string;
     parentId?: number;
     sortOrder?: number;
-  }
+  },
 ) {
   const res = await fetchWithAuth(`${CATALOG_PROXY}/categories/${id}`, {
     method: "PATCH",
@@ -174,7 +171,7 @@ export async function updateProduct(
     fullName?: string;
     description?: string;
     sortOrder?: number;
-  }
+  },
 ) {
   const res = await fetchWithAuth(`${CATALOG_PROXY}/products/admin/${id}`, {
     method: "PATCH",
@@ -231,7 +228,7 @@ export async function updateBranch(
     region?: string;
     phone?: string;
     isActive?: boolean;
-  }
+  },
 ) {
   const res = await fetchWithAuth(`${CATALOG_PROXY}/branches/${id}`, {
     method: "PATCH",
@@ -280,7 +277,7 @@ export async function createBranchProduct(data: {
 
 export async function updateBranchProduct(
   id: number,
-  data: { price?: number; stock?: number; isActive?: boolean }
+  data: { price?: number; stock?: number; isActive?: boolean },
 ) {
   const res = await fetchWithAuth(`${CATALOG_PROXY}/branch-products/${id}`, {
     method: "PATCH",
@@ -304,17 +301,18 @@ export async function deleteBranchProduct(id: number) {
 }
 
 // ---- Image API ----
-// Документация: https://dev-image-s.russoft-it.ru/docs (POST /images/upload → ImageDto.externalId).
-// Привязка к товару: entityType="catalog.product", entityId=id товара (строка). Каталог при отдаче ProductDto
-// должен подгружать images из image-сервиса по product id (в Swagger каталога нет POST .../images).
+// image_service: POST /images/upload — multipart/form-data: file, entityType, entityId, imageType? (UploadImageDto).
 export async function uploadImage(
   file: File,
-  options: { entityType: string; entityId: string }
+  options: { entityType: string; entityId: string; imageType?: string },
 ) {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("entityType", options.entityType);
   formData.append("entityId", options.entityId);
+  if (options.imageType != null && options.imageType !== "") {
+    formData.append("imageType", options.imageType);
+  }
 
   const tokens = getTokens();
   const headers: Record<string, string> = {};
