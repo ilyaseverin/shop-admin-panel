@@ -6,7 +6,9 @@ import {
   createCategory,
   updateCategory,
   deleteCategory,
+  checkCategorySlugExists,
 } from "@/lib/api";
+import { generateSlug, generateUniqueSlug } from "@/lib/slug";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,6 +45,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Search,
+  RefreshCw,
 } from "lucide-react";
 
 interface Category {
@@ -86,6 +89,8 @@ export default function CategoriesPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<CategoryForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [slugExists, setSlugExists] = useState(false);
+  const [slugChecking, setSlugChecking] = useState(false);
 
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -114,6 +119,7 @@ export default function CategoriesPage() {
   const openCreate = () => {
     setEditingId(null);
     setForm(emptyForm);
+    setSlugExists(false);
     setDialogOpen(true);
   };
 
@@ -127,12 +133,36 @@ export default function CategoriesPage() {
       parentId: cat.parentId ? String(cat.parentId) : "",
       sortOrder: "",
     });
+    setSlugExists(false);
     setDialogOpen(true);
   };
+
+  useEffect(() => {
+    if (!dialogOpen || !form.slug?.trim()) {
+      setSlugExists(false);
+      return;
+    }
+    const t = setTimeout(async () => {
+      setSlugChecking(true);
+      try {
+        const exists = await checkCategorySlugExists(form.slug.trim(), editingId ?? undefined);
+        setSlugExists(exists);
+      } catch {
+        setSlugExists(false);
+      } finally {
+        setSlugChecking(false);
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [dialogOpen, form.slug, editingId]);
 
   const handleSave = async () => {
     if (!form.name || !form.slug) {
       toast.error("Заполните обязательные поля (Имя и Slug)");
+      return;
+    }
+    if (slugExists) {
+      toast.error("Этот слаг уже используется. Выберите другой.");
       return;
     }
     setSaving(true);
@@ -183,15 +213,6 @@ export default function CategoriesPage() {
   };
 
   const totalPages = Math.ceil(total / limit);
-
-  const generateSlug = (name: string) => {
-    return name
-      .toLowerCase()
-      .replace(/[^a-zа-яё0-9\s-]/g, "")
-      .replace(/\s+/g, "-")
-      .replace(/-+/g, "-")
-      .trim();
-  };
 
   return (
     <div className="space-y-6">
@@ -361,16 +382,40 @@ export default function CategoriesPage() {
               </div>
               <div className="space-y-2">
                 <Label>Slug *</Label>
-                <Input
-                  value={form.slug}
-                  onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value }))}
-                  placeholder="electronics"
-                  className="bg-muted/50 font-mono text-sm"
-                />
+                <div className="flex gap-2 items-center">
+                  <Input
+                    value={form.slug}
+                    onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value }))}
+                    placeholder="electronics"
+                    className="bg-muted/50 font-mono text-sm"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    title="Регенерировать уникальный слаг из названия"
+                    onClick={async () => {
+                      const slug = await generateUniqueSlug(form.name, (s) =>
+                        checkCategorySlugExists(s, editingId ?? undefined),
+                      );
+                      setForm((f) => ({ ...f, slug }));
+                    }}
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="min-h-5 text-xs">
+                  {slugChecking && (
+                    <p className="text-muted-foreground">Проверка слага...</p>
+                  )}
+                  {!slugChecking && slugExists && (
+                    <p className="text-destructive">Слаг уже используется</p>
+                  )}
+                </div>
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Полное имя</Label>
+                <Label>Полное имя</Label>
               <Input
                 value={form.fullName}
                 onChange={(e) =>

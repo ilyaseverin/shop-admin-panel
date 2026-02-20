@@ -9,7 +9,9 @@ import {
   deleteProduct,
   uploadImage,
   getImageUrl,
+  checkProductSlugExists,
 } from "@/lib/api";
+import { generateSlug, generateUniqueSlug } from "@/lib/slug";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,6 +43,7 @@ import {
   Star,
   Image as ImageIcon,
   Search,
+  RefreshCw,
 } from "lucide-react";
 
 interface ProductImage {
@@ -96,6 +99,8 @@ export default function ProductsPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<ProductForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [slugExists, setSlugExists] = useState(false);
+  const [slugChecking, setSlugChecking] = useState(false);
 
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -131,6 +136,7 @@ export default function ProductsPage() {
     setForm(emptyForm);
     setUploadedImages([]);
     setPendingFiles([]);
+    setSlugExists(false);
     setDialogOpen(true);
   };
 
@@ -147,8 +153,29 @@ export default function ProductsPage() {
     });
     setUploadedImages(product.images || []);
     setPendingFiles([]);
+    setSlugExists(false);
     setDialogOpen(true);
   };
+
+  // Проверка занятости слага (с debounce)
+  useEffect(() => {
+    if (!dialogOpen || !form.slug?.trim()) {
+      setSlugExists(false);
+      return;
+    }
+    const t = setTimeout(async () => {
+      setSlugChecking(true);
+      try {
+        const exists = await checkProductSlugExists(form.slug.trim(), editingId ?? undefined);
+        setSlugExists(exists);
+      } catch {
+        setSlugExists(false);
+      } finally {
+        setSlugChecking(false);
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [dialogOpen, form.slug, editingId]);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -187,18 +214,13 @@ export default function ProductsPage() {
     );
   };
 
-  const generateSlug = (name: string) => {
-    return name
-      .toLowerCase()
-      .replace(/[^a-zа-яё0-9\s-]/g, "")
-      .replace(/\s+/g, "-")
-      .replace(/-+/g, "-")
-      .trim();
-  };
-
   const handleSave = async () => {
     if (!form.name || !form.slug || !form.price || !form.categoryId) {
       toast.error("Заполните обязательные поля (Имя, Slug, Цена, Категория)");
+      return;
+    }
+    if (slugExists) {
+      toast.error("Этот слаг уже используется. Выберите другой.");
       return;
     }
     setSaving(true);
@@ -468,18 +490,42 @@ export default function ProductsPage() {
               </div>
               <div className="space-y-2">
                 <Label>Slug *</Label>
-                <Input
-                  value={form.slug}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, slug: e.target.value }))
-                  }
-                  placeholder="smartphone-xyz"
-                  className="bg-muted/50 font-mono text-sm"
-                />
+                <div className="flex gap-2 items-center">
+                  <Input
+                    value={form.slug}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, slug: e.target.value }))
+                    }
+                    placeholder="smartphone-xyz"
+                    className="bg-muted/50 font-mono text-sm"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    title="Регенерировать уникальный слаг из названия"
+                    onClick={async () => {
+                      const slug = await generateUniqueSlug(form.name, (s) =>
+                        checkProductSlugExists(s, editingId ?? undefined),
+                      );
+                      setForm((f) => ({ ...f, slug }));
+                    }}
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="min-h-5 text-xs">
+                  {slugChecking && (
+                    <p className="text-muted-foreground">Проверка слага...</p>
+                  )}
+                  {!slugChecking && slugExists && (
+                    <p className="text-destructive">Слаг уже используется</p>
+                  )}
+                </div>
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Полное название</Label>
+                <Label>Полное название</Label>
               <Input
                 value={form.fullName}
                 onChange={(e) =>
