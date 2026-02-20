@@ -12,6 +12,8 @@ RUN npm run build
 # Продакшен
 FROM node:20-alpine AS runner
 
+RUN apk add --no-cache ca-certificates
+
 WORKDIR /app
 
 ENV NODE_ENV=production

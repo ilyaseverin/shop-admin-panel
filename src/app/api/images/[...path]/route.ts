@@ -1,15 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const IMAGE_API =
-  process.env.NEXT_PUBLIC_IMAGE_API || "https://dev-image-s.russoft-it.ru";
+function getImageApi() {
+  return (
+    process.env.IMAGE_API ||
+    process.env.NEXT_PUBLIC_IMAGE_API ||
+    "https://dev-image-s.russoft-it.ru"
+  );
+}
+
+function proxyError(err: unknown) {
+  const message = err instanceof Error ? err.message : String(err);
+  console.error("[PROXY]", message);
+  return new NextResponse(
+    JSON.stringify({ error: "Proxy error", detail: message }),
+    { status: 500, headers: { "Content-Type": "application/json" } },
+  );
+}
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   const { path } = await params;
+  const base = getImageApi();
   const targetPath = path.join("/");
-  const url = `${IMAGE_API}/${targetPath}${request.nextUrl.search}`;
+  const url = `${base}/${targetPath}${request.nextUrl.search}`;
 
   const headers: Record<string, string> = {};
   const auth = request.headers.get("authorization");
@@ -35,10 +50,7 @@ export async function GET(
       headers: { "Content-Type": contentType },
     });
   } catch (error) {
-    console.error(`[PROXY] Error GET ${url}:`, error);
-    return new NextResponse(JSON.stringify({ error: "Proxy error" }), {
-      status: 500,
-    });
+    return proxyError(error);
   }
 }
 
@@ -47,8 +59,9 @@ export async function POST(
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   const { path } = await params;
+  const base = getImageApi();
   const targetPath = path.join("/");
-  const url = `${IMAGE_API}/${targetPath}${request.nextUrl.search}`;
+  const url = `${base}/${targetPath}${request.nextUrl.search}`;
 
   const formData = await request.formData();
   const headers: Record<string, string> = {};
@@ -65,9 +78,6 @@ export async function POST(
       },
     });
   } catch (error) {
-    console.error(`[PROXY] Error POST ${url}:`, error);
-    return new NextResponse(JSON.stringify({ error: "Proxy error" }), {
-      status: 500,
-    });
+    return proxyError(error);
   }
 }
