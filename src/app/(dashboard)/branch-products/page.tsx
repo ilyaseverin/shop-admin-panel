@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useDebounce } from "@/lib/utils";
 import {
-  getBranchProducts,
+  getAllBranchProducts,
   getProducts,
   getBranches,
   getCategories,
@@ -78,6 +78,10 @@ export default function BranchProductsPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [branchFilter, setBranchFilter] = useState<string>("all");
+  /** Фильтр по статусу: по умолчанию только активные привязки. */
+  const [statusFilter, setStatusFilter] = useState<
+    "active" | "inactive" | "all"
+  >("active");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
@@ -96,7 +100,7 @@ export default function BranchProductsPage() {
     if (!silent) setLoading(true);
     try {
       const [bpRes, prodRes, branchRes, catRes] = await Promise.all([
-        getBranchProducts(),
+        getAllBranchProducts(),
         getProducts(),
         getBranches(),
         getCategories({ page: 1, limit: 500 }),
@@ -124,6 +128,14 @@ export default function BranchProductsPage() {
     return branchProducts.filter((bp) => bp.branchId === id);
   }, [branchProducts, branchFilter]);
 
+  const filteredByBranchAndStatus = useMemo(() => {
+    if (statusFilter === "active")
+      return filteredByBranch.filter((bp) => bp.isActive);
+    if (statusFilter === "inactive")
+      return filteredByBranch.filter((bp) => !bp.isActive);
+    return filteredByBranch;
+  }, [filteredByBranch, statusFilter]);
+
   const productsForSelect = useMemo(() => {
     if (!debouncedProductSearch.trim()) return [];
     const q = debouncedProductSearch.trim().toLowerCase();
@@ -132,7 +144,7 @@ export default function BranchProductsPage() {
         (p) =>
           p.name?.toLowerCase().includes(q) ||
           p.fullName?.toLowerCase().includes(q) ||
-          p.slug?.toLowerCase().includes(q)
+          p.slug?.toLowerCase().includes(q),
       )
       .slice(0, 50);
   }, [products, debouncedProductSearch]);
@@ -207,8 +219,9 @@ export default function BranchProductsPage() {
         toast.success("Товар в филиале обновлён");
         setDialogOpen(false);
         loadData(true);
-      } catch {
-        toast.error("Ошибка сохранения");
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Ошибка сохранения";
+        toast.error(msg);
       } finally {
         setSaving(false);
       }
@@ -227,7 +240,7 @@ export default function BranchProductsPage() {
     const branchId = Number(formBranchId);
     const productId = Number(formProductId);
     const exists = branchProducts.some(
-      (bp) => bp.branchId === branchId && bp.productId === productId
+      (bp) => bp.branchId === branchId && bp.productId === productId,
     );
     if (exists) {
       toast.error("Этот товар уже привязан к выбранному филиалу");
@@ -249,7 +262,7 @@ export default function BranchProductsPage() {
       const status = (e as { status?: number })?.status;
       if (status === 409) {
         toast.error(
-          "Такая привязка уже есть. Возможно, удаление на сервере не сработало — обновите страницу (F5) и попробуйте снова."
+          "Такая привязка уже есть. Возможно, удаление на сервере не сработало — обновите страницу (F5) и попробуйте снова.",
         );
         loadData(true);
       } else {
@@ -307,10 +320,7 @@ export default function BranchProductsPage() {
           <Label className="text-sm text-muted-foreground whitespace-nowrap">
             Филиал:
           </Label>
-          <Select
-            value={branchFilter}
-            onValueChange={setBranchFilter}
-          >
+          <Select value={branchFilter} onValueChange={setBranchFilter}>
             <SelectTrigger className="w-[220px]">
               <SelectValue placeholder="Все филиалы" />
             </SelectTrigger>
@@ -321,6 +331,26 @@ export default function BranchProductsPage() {
                   {b.name}
                 </SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center gap-2">
+          <Label className="text-sm text-muted-foreground whitespace-nowrap">
+            Статус:
+          </Label>
+          <Select
+            value={statusFilter}
+            onValueChange={(v: "active" | "inactive" | "all") =>
+              setStatusFilter(v)
+            }
+          >
+            <SelectTrigger className="w-[180px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Только активные</SelectItem>
+              <SelectItem value="inactive">Только неактивные</SelectItem>
+              <SelectItem value="all">Все</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -340,14 +370,19 @@ export default function BranchProductsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredByBranch.length === 0 ? (
+            {filteredByBranchAndStatus.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                  Нет привязок. Нажмите «Привязать товар к филиалу».
+                <TableCell
+                  colSpan={7}
+                  className="text-center text-muted-foreground py-8"
+                >
+                  {filteredByBranch.length === 0
+                    ? "Нет привязок. Нажмите «Привязать товар к филиалу»."
+                    : "Нет привязок по выбранному фильтру."}
                 </TableCell>
               </TableRow>
             ) : (
-              filteredByBranch.map((bp) => {
+              filteredByBranchAndStatus.map((bp) => {
                 const product = products.find((p) => p.id === bp.productId);
                 return (
                   <TableRow key={bp.id}>
@@ -398,25 +433,30 @@ export default function BranchProductsPage() {
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {editingId ? "Редактировать товар в филиале" : "Привязать товар к филиалу"}
+              {editingId
+                ? "Редактировать товар в филиале"
+                : "Привязать товар к филиалу"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             {editingId && (
               <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
-                Филиал: <span className="font-medium text-foreground">{getBranchName(Number(formBranchId))}</span>
+                Филиал:{" "}
+                <span className="font-medium text-foreground">
+                  {getBranchName(Number(formBranchId))}
+                </span>
                 {" · "}
-                Товар: <span className="font-medium text-foreground">{getProductName(Number(formProductId))}</span>
+                Товар:{" "}
+                <span className="font-medium text-foreground">
+                  {getProductName(Number(formProductId))}
+                </span>
               </div>
             )}
             {!editingId && (
               <>
                 <div className="space-y-2">
                   <Label>Филиал</Label>
-                  <Select
-                    value={formBranchId}
-                    onValueChange={setFormBranchId}
-                  >
+                  <Select value={formBranchId} onValueChange={setFormBranchId}>
                     <SelectTrigger>
                       <SelectValue placeholder="Выберите филиал" />
                     </SelectTrigger>
@@ -497,7 +537,7 @@ export default function BranchProductsPage() {
                       <span className="text-foreground">
                         {getCategoryName(
                           products.find((p) => p.id === Number(formProductId))
-                            ?.categoryId ?? 0
+                            ?.categoryId ?? 0,
                         ) || "—"}
                       </span>
                     </p>
@@ -559,19 +599,27 @@ export default function BranchProductsPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
+      <Dialog
+        open={!!deleteId}
+        onOpenChange={(open) => !open && setDeleteId(null)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Отвязать товар от филиала?</DialogTitle>
           </DialogHeader>
           <p className="text-muted-foreground text-sm">
-            Товар перестанет отображаться в этом филиале. Цену и остаток можно будет задать заново при повторной привязке.
+            Товар перестанет отображаться в этом филиале. Цену и остаток можно
+            будет задать заново при повторной привязке.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteId(null)}>
               Отмена
             </Button>
-            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
               {deleting ? "Удаление…" : "Отвязать"}
             </Button>
           </DialogFooter>

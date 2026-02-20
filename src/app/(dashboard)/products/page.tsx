@@ -9,7 +9,9 @@ import {
   deleteProduct,
   uploadImage,
   getImageUrl,
+  checkProductSlugExists,
 } from "@/lib/api";
+import { generateSlug, generateUniqueSlug } from "@/lib/slug";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,8 +40,10 @@ import {
   Trash2,
   Upload,
   X,
+  Star,
   Image as ImageIcon,
   Search,
+  RefreshCw,
 } from "lucide-react";
 
 interface ProductImage {
@@ -95,6 +99,8 @@ export default function ProductsPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<ProductForm>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [slugExists, setSlugExists] = useState(false);
+  const [slugChecking, setSlugChecking] = useState(false);
 
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -130,6 +136,7 @@ export default function ProductsPage() {
     setForm(emptyForm);
     setUploadedImages([]);
     setPendingFiles([]);
+    setSlugExists(false);
     setDialogOpen(true);
   };
 
@@ -146,70 +153,74 @@ export default function ProductsPage() {
     });
     setUploadedImages(product.images || []);
     setPendingFiles([]);
+    setSlugExists(false);
     setDialogOpen(true);
   };
+
+  // Проверка занятости слага (с debounce)
+  useEffect(() => {
+    if (!dialogOpen || !form.slug?.trim()) {
+      setSlugExists(false);
+      return;
+    }
+    const t = setTimeout(async () => {
+      setSlugChecking(true);
+      try {
+        const exists = await checkProductSlugExists(form.slug.trim(), editingId ?? undefined);
+        setSlugExists(exists);
+      } catch {
+        setSlugExists(false);
+      } finally {
+        setSlugChecking(false);
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [dialogOpen, form.slug, editingId]);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    if (editingId != null) {
-      setUploading(true);
-      try {
-        for (const file of Array.from(files)) {
-          const result = await uploadImage(file, {
-            entityType: "catalog.product",
-            entityId: String(editingId),
-          });
-          if (result?.externalId) {
-            setUploadedImages((prev) => [
-              ...prev,
-              { url: result.externalId, type: "product" },
-            ]);
-          }
-        }
-        toast.success("Изображение загружено");
-      } catch {
-        toast.error("Ошибка загрузки изображения");
-      } finally {
-        setUploading(false);
-      }
-    } else {
-      for (const file of Array.from(files)) {
-        const blobUrl = URL.createObjectURL(file);
-        setPendingFiles((prev) => [...prev, file]);
-        setUploadedImages((prev) => [
-          ...prev,
-          { url: blobUrl, type: "product" },
-        ]);
-      }
-      toast.success("Изображение добавлено (загрузится при сохранении)");
+    for (const file of Array.from(files)) {
+      const blobUrl = URL.createObjectURL(file);
+      setPendingFiles((prev) => [...prev, file]);
+      setUploadedImages((prev) => [
+        ...prev,
+        { url: blobUrl, type: "product" },
+      ]);
     }
+    toast.success("Изображение добавлено (загрузится при сохранении)");
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const removeImage = (index: number) => {
     setUploadedImages((prev) => {
-      const next = prev.filter((_, i) => i !== index);
       const removed = prev[index];
-      if (removed?.url.startsWith("blob:")) URL.revokeObjectURL(removed.url);
-      return next;
+      const isBlob = removed?.url.startsWith("blob:");
+      if (isBlob && removed) URL.revokeObjectURL(removed.url);
+      const blobIndex =
+        isBlob ? prev.slice(0, index).filter((img) => img.url.startsWith("blob:")).length : -1;
+      if (blobIndex >= 0) setPendingFiles((p) => p.filter((_, i) => i !== blobIndex));
+      return prev.filter((_, i) => i !== index);
     });
-    setPendingFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const generateSlug = (name: string) => {
-    return name
-      .toLowerCase()
-      .replace(/[^a-zа-яё0-9\s-]/g, "")
-      .replace(/\s+/g, "-")
-      .replace(/-+/g, "-")
-      .trim();
+  const setMainImage = (index: number) => {
+    setUploadedImages((prev) =>
+      prev.map((img, i) => ({
+        ...img,
+        type: i === index ? "main" : "product",
+      }))
+    );
   };
 
   const handleSave = async () => {
     if (!form.name || !form.slug || !form.price || !form.categoryId) {
       toast.error("Заполните обязательные поля (Имя, Slug, Цена, Категория)");
+      return;
+    }
+    if (slugExists) {
+      toast.error("Этот слаг уже используется. Выберите другой.");
       return;
     }
     setSaving(true);
@@ -226,6 +237,21 @@ export default function ProductsPage() {
 
       if (editingId) {
         await updateProduct(editingId, payload);
+        const blobImages = uploadedImages.filter((img) => img.url.startsWith("blob:"));
+        if (pendingFiles.length > 0) {
+          setUploading(true);
+          try {
+            for (let i = 0; i < pendingFiles.length; i++) {
+              await uploadImage(pendingFiles[i], {
+                entityType: "catalog.product",
+                entityId: String(editingId),
+                imageType: blobImages[i]?.type || "product",
+              });
+            }
+          } finally {
+            setUploading(false);
+          }
+        }
         toast.success("Товар обновлён");
         setDialogOpen(false);
         loadData(true);
@@ -241,10 +267,12 @@ export default function ProductsPage() {
         if (pendingFiles.length > 0) {
           setUploading(true);
           try {
-            for (const file of pendingFiles) {
-              await uploadImage(file, {
+            const blobImages = uploadedImages.filter((img) => img.url.startsWith("blob:"));
+            for (let i = 0; i < pendingFiles.length; i++) {
+              await uploadImage(pendingFiles[i], {
                 entityType: "catalog.product",
                 entityId: String(newId),
+                imageType: blobImages[i]?.type || "product",
               });
             }
           } finally {
@@ -283,7 +311,7 @@ export default function ProductsPage() {
 
   const filteredProducts = search
     ? products.filter((p) =>
-        p.name.toLowerCase().includes(search.toLowerCase())
+        p.name.toLowerCase().includes(search.toLowerCase()),
       )
     : products;
 
@@ -296,7 +324,10 @@ export default function ProductsPage() {
             Управление товарами магазина
           </p>
         </div>
-        <Button onClick={openCreate} className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 shadow-lg shadow-emerald-500/25">
+        <Button
+          onClick={openCreate}
+          className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 shadow-lg shadow-emerald-500/25"
+        >
           <Plus className="w-4 h-4 mr-2" />
           Добавить
         </Button>
@@ -353,11 +384,18 @@ export default function ProductsPage() {
                   <TableCell className="font-mono text-xs text-muted-foreground">
                     {product.id}
                   </TableCell>
-                  <TableCell className="font-medium max-w-[200px] truncate" title={product.name}>
+                  <TableCell
+                    className="font-medium max-w-[200px] truncate"
+                    title={product.name}
+                  >
                     {product.name}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="secondary" className="font-mono text-xs max-w-[150px] truncate block" title={product.slug}>
+                    <Badge
+                      variant="secondary"
+                      className="font-mono text-xs max-w-[150px] truncate block"
+                      title={product.slug}
+                    >
                       {product.slug}
                     </Badge>
                   </TableCell>
@@ -452,18 +490,42 @@ export default function ProductsPage() {
               </div>
               <div className="space-y-2">
                 <Label>Slug *</Label>
-                <Input
-                  value={form.slug}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, slug: e.target.value }))
-                  }
-                  placeholder="smartphone-xyz"
-                  className="bg-muted/50 font-mono text-sm"
-                />
+                <div className="flex gap-2 items-center">
+                  <Input
+                    value={form.slug}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, slug: e.target.value }))
+                    }
+                    placeholder="smartphone-xyz"
+                    className="bg-muted/50 font-mono text-sm"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    title="Регенерировать уникальный слаг из названия"
+                    onClick={async () => {
+                      const slug = await generateUniqueSlug(form.name, (s) =>
+                        checkProductSlugExists(s, editingId ?? undefined),
+                      );
+                      setForm((f) => ({ ...f, slug }));
+                    }}
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="min-h-5 text-xs">
+                  {slugChecking && (
+                    <p className="text-muted-foreground">Проверка слага...</p>
+                  )}
+                  {!slugChecking && slugExists && (
+                    <p className="text-destructive">Слаг уже используется</p>
+                  )}
+                </div>
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Полное название</Label>
+                <Label>Полное название</Label>
               <Input
                 value={form.fullName}
                 onChange={(e) =>
@@ -541,17 +603,37 @@ export default function ProductsPage() {
                         className="relative w-20 h-20 rounded-lg bg-muted overflow-hidden group/img border border-border"
                       >
                         <img
-                          src={img.url.startsWith("blob:") ? img.url : getImageUrl(img.url)}
+                          src={
+                            img.url.startsWith("blob:")
+                              ? img.url
+                              : getImageUrl(img.url)
+                          }
                           alt=""
                           className="w-full h-full object-cover"
                         />
-                        <button
-                          type="button"
-                          onClick={() => removeImage(idx)}
-                          className="absolute top-1 right-1 w-5 h-5 bg-destructive rounded-full flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity"
-                        >
-                          <X className="w-3 h-3 text-white" />
-                        </button>
+                        {img.type === "main" && (
+                          <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-amber-500/90 text-white text-[10px] font-medium flex items-center gap-0.5">
+                            <Star className="w-2.5 h-2.5 fill-current" />
+                            Главное
+                          </span>
+                        )}
+                        <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover/img:opacity-100 transition-opacity">
+                          <button
+                            type="button"
+                            onClick={() => setMainImage(idx)}
+                            title="Сделать главным"
+                            className="w-5 h-5 bg-muted hover:bg-amber-500 rounded-full flex items-center justify-center text-muted-foreground hover:text-white"
+                          >
+                            <Star className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeImage(idx)}
+                            className="w-5 h-5 bg-destructive rounded-full flex items-center justify-center text-white"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
