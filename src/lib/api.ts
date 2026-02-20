@@ -218,15 +218,25 @@ export async function checkProductSlugExists(
   );
 }
 
-// ---- Branches API ----
-export async function getBranches() {
-  const res = await fetchWithAuth(`${CATALOG_PROXY}/branches`);
+// ---- Branches API (Admin: /api/admin/branches) ----
+export async function getBranches(params?: {
+  page?: number;
+  limit?: number;
+  isActive?: boolean;
+}) {
+  const query = new URLSearchParams();
+  query.set("page", String(params?.page ?? 1));
+  query.set("limit", String(params?.limit ?? 5000));
+  if (params?.isActive !== undefined) query.set("isActive", String(params.isActive));
+  const url = `${CATALOG_PROXY}/api/admin/branches?${query.toString()}`;
+  const res = await fetchWithAuth(url);
   if (!res.ok) throw new Error("Ошибка загрузки филиалов");
-  return res.json();
+  const data = await res.json();
+  return Array.isArray(data) ? data : (data?.items ?? []);
 }
 
 export async function getBranch(id: number) {
-  const res = await fetchWithAuth(`${CATALOG_PROXY}/branches/${id}`);
+  const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/branches/${id}`);
   if (!res.ok) throw new Error("Ошибка загрузки филиала");
   return res.json();
 }
@@ -240,7 +250,7 @@ export async function createBranch(data: {
   phone?: string;
   isActive?: boolean;
 }) {
-  const res = await fetchWithAuth(`${CATALOG_PROXY}/branches`, {
+  const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/branches`, {
     method: "POST",
     body: JSON.stringify(data),
   });
@@ -260,7 +270,7 @@ export async function updateBranch(
     isActive?: boolean;
   },
 ) {
-  const res = await fetchWithAuth(`${CATALOG_PROXY}/branches/${id}`, {
+  const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/branches/${id}`, {
     method: "PATCH",
     body: JSON.stringify(data),
   });
@@ -269,7 +279,7 @@ export async function updateBranch(
 }
 
 export async function deleteBranch(id: number) {
-  const res = await fetchWithAuth(`${CATALOG_PROXY}/branches/${id}`, {
+  const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/branches/${id}`, {
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Ошибка удаления филиала");

@@ -1,11 +1,26 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shop-admin-panel
     ports:
       - "4000:3000"
     env_file:
       - .env
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
+    environment:
+      - NODE_ENV=production
+      - VIRTUAL_HOST=${AUTO_SSL_VIRTUAL_HOST}
+      - LETSENCRYPT_HOST=${AUTO_SSL_LETSENCRYPT_HOST}
+      - LETSENCRYPT_EMAIL=${AUTO_SSL_LETSENCRYPT_EMAIL}
+      - VIRTUAL_PORT=${AUTO_SSL_VIRTUAL_PORT:-3000}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - shop-admin
     restart: always
+
+networks:
+  shop-admin:
+    driver: bridge
+    name: shop-admin-network
