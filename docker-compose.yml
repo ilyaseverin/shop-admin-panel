@@ -14,13 +14,15 @@ services:
       - LETSENCRYPT_HOST=${AUTO_SSL_LETSENCRYPT_HOST}
       - LETSENCRYPT_EMAIL=${AUTO_SSL_LETSENCRYPT_EMAIL}
       - VIRTUAL_PORT=${AUTO_SSL_VIRTUAL_PORT:-3000}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - shop-admin
+      - proxy-net-v1
     restart: always
 
 networks:
   shop-admin:
     driver: bridge
     name: shop-admin-network
+  proxy-net-v1:
+    external: true
+    name: proxy-net-v1
