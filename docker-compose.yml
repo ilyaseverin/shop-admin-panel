@@ -15,7 +15,7 @@ services:
       - LETSENCRYPT_EMAIL=${AUTO_SSL_LETSENCRYPT_EMAIL}
       - VIRTUAL_PORT=${AUTO_SSL_VIRTUAL_PORT:-3000}
     networks:
-      - shop-net-v1
+      - shop-admin
     restart: always
 
 networks:
