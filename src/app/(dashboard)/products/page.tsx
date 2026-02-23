@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
-  getProducts,
+  getProductsAll,
+  getProduct,
   getCategories,
   createProduct,
   updateProduct,
@@ -12,6 +13,7 @@ import {
   checkProductSlugExists,
 } from "@/lib/api";
 import { generateSlug, generateUniqueSlug } from "@/lib/slug";
+import { useDebounce } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -110,15 +112,27 @@ export default function ProductsPage() {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [categorySearch, setCategorySearch] = useState("");
+  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
+  const [categorySearchResults, setCategorySearchResults] = useState<
+    Category[]
+  >([]);
+  const [categorySearchLoading, setCategorySearchLoading] = useState(false);
+  const [categorySearchPage, setCategorySearchPage] = useState(1);
+  const [categorySearchTotal, setCategorySearchTotal] = useState(0);
+  const [selectedCategoryName, setSelectedCategoryName] = useState("");
+  const categoryListRef = useRef<HTMLDivElement>(null);
+  const categorySearchLimit = 5;
+  const debouncedCategorySearch = useDebounce(categorySearch, 300);
 
   const loadData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
       const [prodData, catData] = await Promise.all([
-        getProducts(),
+        getProductsAll(),
         getCategories({ page: 1, limit: 100 }),
       ]);
-      setProducts(Array.isArray(prodData) ? prodData : []);
+      setProducts((Array.isArray(prodData) ? prodData : []) as Product[]);
       setCategories(catData?.items || []);
     } catch {
       toast.error("Ошибка загрузки данных");
@@ -137,6 +151,9 @@ export default function ProductsPage() {
     setUploadedImages([]);
     setPendingFiles([]);
     setSlugExists(false);
+    setCategorySearch("");
+    setSelectedCategoryName("");
+    setCategorySearchPage(1);
     setDialogOpen(true);
   };
 
@@ -154,6 +171,10 @@ export default function ProductsPage() {
     setUploadedImages(product.images || []);
     setPendingFiles([]);
     setSlugExists(false);
+    setCategorySearch("");
+    setSelectedCategoryName(
+      categories.find((c) => c.id === product.categoryId)?.name || "",
+    );
     setDialogOpen(true);
   };
 
@@ -166,7 +187,10 @@ export default function ProductsPage() {
     const t = setTimeout(async () => {
       setSlugChecking(true);
       try {
-        const exists = await checkProductSlugExists(form.slug.trim(), editingId ?? undefined);
+        const exists = await checkProductSlugExists(
+          form.slug.trim(),
+          editingId ?? undefined,
+        );
         setSlugExists(exists);
       } catch {
         setSlugExists(false);
@@ -184,10 +208,7 @@ export default function ProductsPage() {
     for (const file of Array.from(files)) {
       const blobUrl = URL.createObjectURL(file);
       setPendingFiles((prev) => [...prev, file]);
-      setUploadedImages((prev) => [
-        ...prev,
-        { url: blobUrl, type: "product" },
-      ]);
+      setUploadedImages((prev) => [...prev, { url: blobUrl, type: "product" }]);
     }
     toast.success("Изображение добавлено (загрузится при сохранении)");
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -198,9 +219,12 @@ export default function ProductsPage() {
       const removed = prev[index];
       const isBlob = removed?.url.startsWith("blob:");
       if (isBlob && removed) URL.revokeObjectURL(removed.url);
-      const blobIndex =
-        isBlob ? prev.slice(0, index).filter((img) => img.url.startsWith("blob:")).length : -1;
-      if (blobIndex >= 0) setPendingFiles((p) => p.filter((_, i) => i !== blobIndex));
+      const blobIndex = isBlob
+        ? prev.slice(0, index).filter((img) => img.url.startsWith("blob:"))
+            .length
+        : -1;
+      if (blobIndex >= 0)
+        setPendingFiles((p) => p.filter((_, i) => i !== blobIndex));
       return prev.filter((_, i) => i !== index);
     });
   };
@@ -210,7 +234,7 @@ export default function ProductsPage() {
       prev.map((img, i) => ({
         ...img,
         type: i === index ? "main" : "product",
-      }))
+      })),
     );
   };
 
@@ -237,7 +261,9 @@ export default function ProductsPage() {
 
       if (editingId) {
         await updateProduct(editingId, payload);
-        const blobImages = uploadedImages.filter((img) => img.url.startsWith("blob:"));
+        const blobImages = uploadedImages.filter((img) =>
+          img.url.startsWith("blob:"),
+        );
         if (pendingFiles.length > 0) {
           setUploading(true);
           try {
@@ -267,7 +293,9 @@ export default function ProductsPage() {
         if (pendingFiles.length > 0) {
           setUploading(true);
           try {
-            const blobImages = uploadedImages.filter((img) => img.url.startsWith("blob:"));
+            const blobImages = uploadedImages.filter((img) =>
+              img.url.startsWith("blob:"),
+            );
             for (let i = 0; i < pendingFiles.length; i++) {
               await uploadImage(pendingFiles[i], {
                 entityType: "catalog.product",
@@ -281,7 +309,35 @@ export default function ProductsPage() {
         }
         toast.success("Товар создан");
         setDialogOpen(false);
-        loadData(true);
+        await loadData(true);
+        const expectedImages = pendingFiles.length;
+        const fetchProductWithImages = async (attempt = 0): Promise<void> => {
+          const maxAttempts = 5;
+          const delayMs = 600;
+          try {
+            const fullProduct = await getProduct(newId);
+            const images = fullProduct?.images ?? [];
+            const hasAll =
+              expectedImages === 0 || images.length >= expectedImages;
+            setProducts((prev) =>
+              prev.some((p) => p.id === newId)
+                ? prev.map((p) =>
+                    p.id === newId ? { ...p, images } : p,
+                  )
+                : [...prev, { ...fullProduct, id: newId, images } as Product],
+            );
+            if (!hasAll && attempt < maxAttempts - 1) {
+              await new Promise((r) => setTimeout(r, delayMs));
+              return fetchProductWithImages(attempt + 1);
+            }
+          } catch {
+            if (attempt < maxAttempts - 1) {
+              await new Promise((r) => setTimeout(r, delayMs));
+              return fetchProductWithImages(attempt + 1);
+            }
+          }
+        };
+        await fetchProductWithImages();
       }
     } catch {
       toast.error("Ошибка сохранения");
@@ -308,6 +364,37 @@ export default function ProductsPage() {
   const getCategoryName = (id: number) => {
     return categories.find((c) => c.id === id)?.name || `#${id}`;
   };
+
+  useEffect(() => {
+    if (!categoryDropdownOpen) return;
+    let cancelled = false;
+    setCategorySearchLoading(true);
+    getCategories({
+      page: categorySearchPage,
+      limit: categorySearchLimit,
+      name: debouncedCategorySearch.trim() || undefined,
+    })
+      .then((data) => {
+        if (cancelled) return;
+        const items = (data as { items?: Category[] }).items ?? [];
+        const total =
+          (data as { meta?: { total?: number } }).meta?.total ?? items.length;
+        setCategorySearchResults(items);
+        setCategorySearchTotal(total);
+      })
+      .catch(() => {
+        if (!cancelled) setCategorySearchResults([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCategorySearchLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [categoryDropdownOpen, debouncedCategorySearch, categorySearchPage]);
+
+  const categorySearchTotalPages =
+    Math.ceil(categorySearchTotal / categorySearchLimit) || 1;
 
   const filteredProducts = search
     ? products.filter((p) =>
@@ -463,15 +550,25 @@ export default function ProductsPage() {
       </div>
 
       {/* Create / Edit Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-2xl bg-card border-border max-h-[90vh] overflow-y-auto">
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) {
+            setCategorySearch("");
+            setCategoryDropdownOpen(false);
+            setSelectedCategoryName("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-4xl bg-card border-border max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingId ? "Редактировать товар" : "Новый товар"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-4">
               <div className="space-y-2">
                 <Label>Название *</Label>
                 <Input
@@ -484,7 +581,7 @@ export default function ProductsPage() {
                       slug: editingId ? f.slug : generateSlug(name),
                     }));
                   }}
-                  placeholder="Смартфон XYZ"
+                  placeholder="Смартфон XYZ Pro 256GB"
                   className="bg-muted/50"
                 />
               </div>
@@ -525,7 +622,7 @@ export default function ProductsPage() {
               </div>
             </div>
             <div className="space-y-2">
-                <Label>Полное название</Label>
+              <Label>Полное название</Label>
               <Input
                 value={form.fullName}
                 onChange={(e) =>
@@ -547,7 +644,7 @@ export default function ProductsPage() {
                 rows={3}
               />
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Цена *</Label>
                 <Input
@@ -560,34 +657,128 @@ export default function ProductsPage() {
                   className="bg-muted/50"
                 />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2" ref={categoryListRef}>
                 <Label>Категория *</Label>
-                <select
-                  value={form.categoryId}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, categoryId: e.target.value }))
-                  }
-                  className="flex h-9 w-full rounded-md border border-input bg-muted/50 px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  <option value="">Выберите...</option>
-                  {categories.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label>Сортировка</Label>
-                <Input
-                  type="number"
-                  value={form.sortOrder}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, sortOrder: e.target.value }))
-                  }
-                  placeholder="0"
-                  className="bg-muted/50"
-                />
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    value={
+                      form.categoryId
+                        ? ((selectedCategoryName ||
+                            categories.find(
+                              (c) => c.id === Number(form.categoryId),
+                            )?.name) ??
+                          categorySearch)
+                        : categorySearch
+                    }
+                    onChange={(e) => {
+                      setCategorySearch(e.target.value);
+                      setCategoryDropdownOpen(true);
+                      setCategorySearchPage(1);
+                      if (form.categoryId) {
+                        setForm((f) => ({ ...f, categoryId: "" }));
+                        setSelectedCategoryName("");
+                      }
+                    }}
+                    onFocus={() => setCategoryDropdownOpen(true)}
+                    onBlur={() =>
+                      setTimeout(() => setCategoryDropdownOpen(false), 200)
+                    }
+                    placeholder="Поиск по имени или slug..."
+                    className="pl-9 bg-muted/50"
+                  />
+                  {categoryDropdownOpen && (
+                    <div
+                      className="absolute left-0 right-0 top-full z-50 mt-1 rounded-md border bg-popover shadow-lg max-h-48 overflow-auto"
+                      onMouseDown={(e) => e.preventDefault()}
+                    >
+                      {categorySearchLoading ? (
+                        <div className="px-3 py-4 text-sm text-muted-foreground text-center">
+                          Поиск…
+                        </div>
+                      ) : categorySearchResults.length === 0 ? (
+                        <div className="px-3 py-4 text-sm text-muted-foreground text-center">
+                          {debouncedCategorySearch.trim()
+                            ? "Нет подходящих категорий"
+                            : "Введите имя или slug для поиска"}
+                        </div>
+                      ) : (
+                        <>
+                          <ul className="p-1">
+                            {categorySearchResults.map((cat) => (
+                              <li key={cat.id}>
+                                <button
+                                  type="button"
+                                  className="w-full text-left px-3 py-2 text-sm rounded-sm hover:bg-accent focus:bg-accent focus:outline-none"
+                                  onClick={() => {
+                                    setForm((f) => ({
+                                      ...f,
+                                      categoryId: String(cat.id),
+                                    }));
+                                    setSelectedCategoryName(cat.name || "");
+                                    setCategorySearch("");
+                                    setCategoryDropdownOpen(false);
+                                  }}
+                                >
+                                  {cat.name}
+                                  {cat.slug && (
+                                    <span className="text-muted-foreground ml-2 text-xs">
+                                      {cat.slug}
+                                    </span>
+                                  )}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                          {categorySearchTotalPages > 1 && (
+                            <div className="flex items-center justify-between gap-2 px-2 py-2 border-t text-sm">
+                              <span className="text-muted-foreground">
+                                {categorySearchTotal} всего
+                              </span>
+                              <div className="flex gap-1">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2"
+                                  disabled={categorySearchPage <= 1}
+                                  onClick={() =>
+                                    setCategorySearchPage((p) =>
+                                      Math.max(1, p - 1),
+                                    )
+                                  }
+                                >
+                                  Назад
+                                </Button>
+                                <span className="flex items-center px-2 text-muted-foreground">
+                                  {categorySearchPage} /{" "}
+                                  {categorySearchTotalPages}
+                                </span>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2"
+                                  disabled={
+                                    categorySearchPage >=
+                                    categorySearchTotalPages
+                                  }
+                                  onClick={() =>
+                                    setCategorySearchPage((p) =>
+                                      Math.min(categorySearchTotalPages, p + 1),
+                                    )
+                                  }
+                                >
+                                  Вперёд
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -672,16 +863,20 @@ export default function ProductsPage() {
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>
-                Отмена
-              </Button>
-              <Button
-                onClick={handleSave}
-                disabled={saving}
-                className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500"
-              >
-                {saving ? "Сохранение..." : editingId ? "Обновить" : "Создать"}
-              </Button>
+                <Button variant="outline" onClick={() => setDialogOpen(false)}>
+                  Отмена
+                </Button>
+                <Button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="bg-linear-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500"
+                >
+                  {saving
+                    ? "Сохранение..."
+                    : editingId
+                      ? "Обновить"
+                      : "Создать"}
+                </Button>
             </div>
           </div>
         </DialogContent>

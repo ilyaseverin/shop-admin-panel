@@ -6,6 +6,7 @@ import {
   createBranch,
   updateBranch,
   deleteBranch,
+  restoreBranch,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -81,6 +82,7 @@ export default function BranchesPage() {
 
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
 
   /** Фильтр по статусу: по умолчанию только активные (неактивные не отображаются). */
   const [statusFilter, setStatusFilter] = useState<
@@ -160,6 +162,24 @@ export default function BranchesPage() {
       toast.error("Ошибка сохранения");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleToggleActive = async (branch: Branch) => {
+    setTogglingId(branch.id);
+    try {
+      if (branch.isActive ?? true) {
+        await deleteBranch(branch.id);
+        toast.success("Филиал деактивирован");
+      } else {
+        await restoreBranch(branch.id);
+        toast.success("Филиал активирован");
+      }
+      loadBranches(true);
+    } catch {
+      toast.error("Ошибка смены статуса");
+    } finally {
+      setTogglingId(null);
     }
   };
 
@@ -277,16 +297,12 @@ export default function BranchesPage() {
                     {branch.phone || "—"}
                   </TableCell>
                   <TableCell>
-                    <Badge
-                      variant={branch.isActive ? "default" : "secondary"}
-                      className={
-                        branch.isActive
-                          ? "bg-emerald-500/15 text-emerald-500 hover:bg-emerald-500/25 border-0"
-                          : "bg-muted text-muted-foreground border-0"
-                      }
-                    >
-                      {branch.isActive ? "Активен" : "Неактивен"}
-                    </Badge>
+                    <Switch
+                      checked={branch.isActive ?? true}
+                      disabled={togglingId === branch.id}
+                      onCheckedChange={() => handleToggleActive(branch)}
+                      title={branch.isActive ? "Деактивировать" : "Активировать"}
+                    />
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -317,7 +333,7 @@ export default function BranchesPage() {
 
       {/* Create / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-lg bg-card border-border">
+        <DialogContent className="sm:max-w-4xl bg-card border-border max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingId ? "Редактировать филиал" : "Новый филиал"}

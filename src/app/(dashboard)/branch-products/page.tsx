@@ -5,11 +5,13 @@ import { useDebounce } from "@/lib/utils";
 import {
   getAllBranchProducts,
   getProducts,
+  getProductsAll,
   getBranches,
   getCategories,
   createBranchProduct,
   updateBranchProduct,
   deleteBranchProduct,
+  restoreBranchProduct,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -87,6 +89,7 @@ export default function BranchProductsPage() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
 
   const [formBranchId, setFormBranchId] = useState<string>("");
   const [formProductId, setFormProductId] = useState<string>("");
@@ -95,14 +98,19 @@ export default function BranchProductsPage() {
   const [formIsActive, setFormIsActive] = useState(true);
   const [productSearch, setProductSearch] = useState("");
   const [productListOpen, setProductListOpen] = useState(false);
+  const [productSearchResults, setProductSearchResults] = useState<Product[]>([]);
+  const [productSearchPage, setProductSearchPage] = useState(1);
+  const [productSearchTotal, setProductSearchTotal] = useState(0);
+  const [productSearchLoading, setProductSearchLoading] = useState(false);
+  const productSearchLimit = 10;
 
   const loadData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
       const [bpRes, prodRes, branchRes, catRes] = await Promise.all([
         getAllBranchProducts(),
-        getProducts(),
-        getBranches(),
+        getProductsAll(),
+        getBranches({ isActive: true }),
         getCategories({ page: 1, limit: 500 }),
       ]);
       setBranchProducts(Array.isArray(bpRes) ? bpRes : []);
@@ -122,6 +130,34 @@ export default function BranchProductsPage() {
 
   const debouncedProductSearch = useDebounce(productSearch, 300);
 
+  useEffect(() => {
+    if (!productListOpen) return;
+    const q = debouncedProductSearch.trim();
+    let cancelled = false;
+    setProductSearchLoading(true);
+    getProducts({
+      page: productSearchPage,
+      limit: productSearchLimit,
+      name: q || undefined,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        const items = res.items ?? [];
+        const total = (res.meta as { total?: number } | undefined)?.total ?? items.length;
+        setProductSearchResults(items);
+        setProductSearchTotal(total);
+      })
+      .catch(() => {
+        if (!cancelled) setProductSearchResults([]);
+      })
+      .finally(() => {
+        if (!cancelled) setProductSearchLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [productListOpen, debouncedProductSearch, productSearchPage]);
+
   const filteredByBranch = useMemo(() => {
     if (branchFilter === "all") return branchProducts;
     const id = Number(branchFilter);
@@ -136,18 +172,7 @@ export default function BranchProductsPage() {
     return filteredByBranch;
   }, [filteredByBranch, statusFilter]);
 
-  const productsForSelect = useMemo(() => {
-    if (!debouncedProductSearch.trim()) return [];
-    const q = debouncedProductSearch.trim().toLowerCase();
-    return products
-      .filter(
-        (p) =>
-          p.name?.toLowerCase().includes(q) ||
-          p.fullName?.toLowerCase().includes(q) ||
-          p.slug?.toLowerCase().includes(q),
-      )
-      .slice(0, 50);
-  }, [products, debouncedProductSearch]);
+  const productSearchTotalPages = Math.ceil(productSearchTotal / productSearchLimit) || 1;
 
   const getBranchName = (id: number) =>
     branches.find((b) => b.id === id)?.name ?? `#${id}`;
@@ -167,6 +192,8 @@ export default function BranchProductsPage() {
     setFormIsActive(true);
     setProductSearch("");
     setProductListOpen(false);
+    setProductSearchPage(1);
+    setProductSearchResults([]);
     setDialogOpen(true);
   };
 
@@ -270,6 +297,24 @@ export default function BranchProductsPage() {
       }
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleToggleActive = async (bp: BranchProduct) => {
+    setTogglingId(bp.id);
+    try {
+      if (bp.isActive) {
+        await deleteBranchProduct(bp.id);
+        toast.success("Товар деактивирован в филиале");
+      } else {
+        await restoreBranchProduct(bp.id);
+        toast.success("Товар активирован в филиале");
+      }
+      await loadData(true);
+    } catch {
+      toast.error("Ошибка смены статуса");
+    } finally {
+      setTogglingId(null);
     }
   };
 
@@ -398,9 +443,12 @@ export default function BranchProductsPage() {
                     </TableCell>
                     <TableCell className="text-right">{bp.stock}</TableCell>
                     <TableCell>
-                      <Badge variant={bp.isActive ? "default" : "secondary"}>
-                        {bp.isActive ? "Активен" : "Неактивен"}
-                      </Badge>
+                      <Switch
+                        checked={bp.isActive}
+                        disabled={togglingId === bp.id}
+                        onCheckedChange={() => handleToggleActive(bp)}
+                        title={bp.isActive ? "Деактивировать" : "Активировать"}
+                      />
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -430,7 +478,7 @@ export default function BranchProductsPage() {
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sm:max-w-4xl bg-card border-border max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingId
@@ -457,10 +505,10 @@ export default function BranchProductsPage() {
                 <div className="space-y-2">
                   <Label>Филиал</Label>
                   <Select value={formBranchId} onValueChange={setFormBranchId}>
-                    <SelectTrigger>
+                    <SelectTrigger className="w-full">
                       <SelectValue placeholder="Выберите филиал" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent position="popper" side="bottom" className="z-[100] w-[var(--radix-select-trigger-width)]">
                       {branches.map((b) => (
                         <SelectItem key={b.id} value={String(b.id)}>
                           {b.name}
@@ -479,6 +527,7 @@ export default function BranchProductsPage() {
                       onChange={(e) => {
                         setProductSearch(e.target.value);
                         setProductListOpen(true);
+                        setProductSearchPage(1);
                         if (formProductId) setFormProductId("");
                       }}
                       onFocus={() => setProductListOpen(true)}
@@ -502,31 +551,77 @@ export default function BranchProductsPage() {
                         className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-lg max-h-56 overflow-auto"
                         onMouseDown={(e) => e.preventDefault()}
                       >
-                        {!debouncedProductSearch.trim() ? (
+                        {productSearchLoading ? (
                           <div className="px-3 py-4 text-sm text-muted-foreground text-center">
-                            Введите название или slug товара
+                            Поиск…
                           </div>
-                        ) : productsForSelect.length === 0 ? (
+                        ) : !debouncedProductSearch.trim() ? (
+                          <div className="px-3 py-4 text-sm text-muted-foreground text-center">
+                            Введите название или slug товара для поиска
+                          </div>
+                        ) : productSearchResults.length === 0 ? (
                           <div className="px-3 py-4 text-sm text-muted-foreground text-center">
                             Нет подходящих товаров
                           </div>
                         ) : (
-                          <ul className="p-1">
-                            {productsForSelect.map((p) => (
-                              <li key={p.id}>
-                                <button
-                                  type="button"
-                                  className="w-full text-left px-3 py-2 text-sm rounded-sm hover:bg-accent focus:bg-accent focus:outline-none flex justify-between items-center"
-                                  onClick={() => selectProduct(p)}
-                                >
-                                  <span>{p.name}</span>
-                                  <span className="text-muted-foreground tabular-nums">
-                                    {p.price.toLocaleString("ru-RU")} ₽
+                          <>
+                            <ul className="p-1">
+                              {productSearchResults.map((p) => (
+                                <li key={p.id}>
+                                  <button
+                                    type="button"
+                                    className="w-full text-left px-3 py-2 text-sm rounded-sm hover:bg-accent focus:bg-accent focus:outline-none flex justify-between items-center"
+                                    onClick={() => selectProduct(p)}
+                                  >
+                                    <span>{p.name}</span>
+                                    <span className="text-muted-foreground tabular-nums">
+                                      {Number(p.price ?? 0).toLocaleString("ru-RU")} ₽
+                                    </span>
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                            {productSearchTotalPages > 1 && (
+                              <div className="flex items-center justify-between gap-2 px-2 py-2 border-t text-sm">
+                                <span className="text-muted-foreground">
+                                  {productSearchTotal} всего
+                                </span>
+                                <div className="flex gap-1">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2"
+                                    disabled={productSearchPage <= 1}
+                                    onClick={() =>
+                                      setProductSearchPage((p) => Math.max(1, p - 1))
+                                    }
+                                  >
+                                    Назад
+                                  </Button>
+                                  <span className="flex items-center px-2 text-muted-foreground">
+                                    {productSearchPage} / {productSearchTotalPages}
                                   </span>
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2"
+                                    disabled={
+                                      productSearchPage >= productSearchTotalPages
+                                    }
+                                    onClick={() =>
+                                      setProductSearchPage((p) =>
+                                        Math.min(productSearchTotalPages, p + 1),
+                                      )
+                                    }
+                                  >
+                                    Вперёд
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     )}
@@ -603,7 +698,7 @@ export default function BranchProductsPage() {
         open={!!deleteId}
         onOpenChange={(open) => !open && setDeleteId(null)}
       >
-        <DialogContent>
+        <DialogContent className="sm:max-w-lg bg-card border-border">
           <DialogHeader>
             <DialogTitle>Отвязать товар от филиала?</DialogTitle>
           </DialogHeader>

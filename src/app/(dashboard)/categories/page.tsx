@@ -356,14 +356,14 @@ export default function CategoriesPage() {
 
       {/* Create / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-lg bg-card border-border">
+        <DialogContent className="sm:max-w-4xl bg-card border-border max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingId ? "Редактировать категорию" : "Новая категория"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-4">
               <div className="space-y-2">
                 <Label>Имя *</Label>
                 <Input
@@ -376,7 +376,7 @@ export default function CategoriesPage() {
                       slug: editingId ? f.slug : generateSlug(name),
                     }));
                   }}
-                  placeholder="Электроника"
+                  placeholder="Электроника и гаджеты"
                   className="bg-muted/50"
                 />
               </div>

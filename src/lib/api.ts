@@ -147,8 +147,30 @@ export async function checkCategorySlugExists(
 }
 
 // ---- Products API ----
-export async function getProducts() {
-  const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/products`);
+export async function getProducts(params?: {
+  page?: number;
+  limit?: number;
+  name?: string;
+}) {
+  const query = new URLSearchParams();
+  if (params?.page != null) query.set("page", String(params.page));
+  if (params?.limit != null) query.set("limit", String(params.limit));
+  if (params?.name?.trim()) query.set("name", params.name.trim());
+  const qs = query.toString();
+  const url = `${CATALOG_PROXY}/api/admin/products${qs ? `?${qs}` : ""}`;
+  const res = await fetchWithAuth(url);
+  if (!res.ok) throw new Error("Ошибка загрузки товаров");
+  const data = await res.json();
+  const items = Array.isArray(data) ? data : (data?.items ?? []);
+  const meta = (data as { meta?: { total?: number } })?.meta;
+  return { items, meta };
+}
+
+/** Все товары одним запросом (для списков без пагинации). */
+export async function getProductsAll(): Promise<
+  { id: number; name?: string; fullName?: string; slug?: string; price?: number; categoryId?: number; sortOrder?: number; images?: { url: string; type: string }[] }[]
+> {
+  const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/products?limit=5000`);
   if (!res.ok) throw new Error("Ошибка загрузки товаров");
   const data = await res.json();
   return Array.isArray(data) ? data : (data?.items ?? []);
@@ -211,7 +233,7 @@ export async function checkProductSlugExists(
 ): Promise<boolean> {
   if (!slug?.trim()) return false;
   const norm = slug.trim().toLowerCase();
-  const items = await getProducts();
+  const items = await getProductsAll();
   return items.some(
     (p: { id: number; slug?: string }) =>
       (p.slug ?? "").toLowerCase() === norm && p.id !== excludeId,
@@ -283,6 +305,16 @@ export async function deleteBranch(id: number) {
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Ошибка удаления филиала");
+}
+
+/** Восстановить филиал после remove (soft delete). */
+export async function restoreBranch(id: number) {
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/branches/${id}/restore`,
+    { method: "PATCH" },
+  );
+  if (!res.ok) throw new Error("Ошибка восстановления филиала");
+  return res.json();
 }
 
 // ---- Branch Products API ----
@@ -378,6 +410,16 @@ export async function deleteBranchProduct(id: number) {
       body: text,
     });
   }
+}
+
+/** Восстановить привязку товар–филиал после remove (soft delete). */
+export async function restoreBranchProduct(id: number) {
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/branch-products/${id}/restore`,
+    { method: "PATCH" },
+  );
+  if (!res.ok) throw new Error("Ошибка восстановления товара в филиале");
+  return res.json();
 }
 
 // ---- Image API ----
