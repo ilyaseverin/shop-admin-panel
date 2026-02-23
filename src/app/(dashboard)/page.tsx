@@ -26,7 +26,7 @@ export default function DashboardPage() {
         ]);
         setStats({
           categories: catData?.meta?.total ?? catData?.items?.length ?? 0,
-          products: Array.isArray(prodData) ? prodData.length : (prodData?.length ?? 0),
+          products: Array.isArray(prodData) ? prodData.length : 0,
           branches: Array.isArray(branchData) ? branchData.length : 0,
         });
       } catch {

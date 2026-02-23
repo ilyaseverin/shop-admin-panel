@@ -1,31 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import {
-  getCategories,
-  createCategory,
-  updateCategory,
-  deleteCategory,
-  checkCategorySlugExists,
-} from "@/lib/api";
-import { generateSlug, generateUniqueSlug } from "@/lib/slug";
+import { getCategories, deleteCategory } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -45,36 +23,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Search,
-  RefreshCw,
 } from "lucide-react";
-
-interface Category {
-  id: number;
-  name: string;
-  fullName: string;
-  slug: string;
-  description: string;
-  parentId: number;
-  images: { url: string; type: string }[];
-}
-
-interface CategoryForm {
-  name: string;
-  fullName: string;
-  slug: string;
-  description: string;
-  parentId: string;
-  sortOrder: string;
-}
-
-const emptyForm: CategoryForm = {
-  name: "",
-  fullName: "",
-  slug: "",
-  description: "",
-  parentId: "",
-  sortOrder: "",
-};
+import type { Category } from "./types";
+import { CategoryFormDialog } from "./components/CategoryFormDialog";
 
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -86,11 +37,7 @@ export default function CategoriesPage() {
   const limit = 10;
 
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState<CategoryForm>(emptyForm);
-  const [saving, setSaving] = useState(false);
-  const [slugExists, setSlugExists] = useState(false);
-  const [slugChecking, setSlugChecking] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
 
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -117,85 +64,18 @@ export default function CategoriesPage() {
   }, [loadCategories]);
 
   const openCreate = () => {
-    setEditingId(null);
-    setForm(emptyForm);
-    setSlugExists(false);
+    setEditingCategory(null);
     setDialogOpen(true);
   };
 
   const openEdit = (cat: Category) => {
-    setEditingId(cat.id);
-    setForm({
-      name: cat.name || "",
-      fullName: cat.fullName || "",
-      slug: cat.slug || "",
-      description: cat.description || "",
-      parentId: cat.parentId ? String(cat.parentId) : "",
-      sortOrder: "",
-    });
-    setSlugExists(false);
+    setEditingCategory(cat);
     setDialogOpen(true);
   };
 
-  useEffect(() => {
-    if (!dialogOpen || !form.slug?.trim()) {
-      setSlugExists(false);
-      return;
-    }
-    const t = setTimeout(async () => {
-      setSlugChecking(true);
-      try {
-        const exists = await checkCategorySlugExists(form.slug.trim(), editingId ?? undefined);
-        setSlugExists(exists);
-      } catch {
-        setSlugExists(false);
-      } finally {
-        setSlugChecking(false);
-      }
-    }, 400);
-    return () => clearTimeout(t);
-  }, [dialogOpen, form.slug, editingId]);
-
-  const handleSave = async () => {
-    if (!form.name || !form.slug) {
-      toast.error("Заполните обязательные поля (Имя и Slug)");
-      return;
-    }
-    if (slugExists) {
-      toast.error("Этот слаг уже используется. Выберите другой.");
-      return;
-    }
-    setSaving(true);
-    try {
-      const payload: any = {
-        name: form.name,
-        slug: form.slug,
-        fullName: form.fullName || undefined,
-        description: form.description || undefined,
-        sortOrder: form.sortOrder ? Number(form.sortOrder) : undefined,
-      };
-      // If parentId is "0" or empty, treat as root (undefined)
-      if (form.parentId && form.parentId !== "0") {
-        payload.parentId = Number(form.parentId);
-      } else {
-        payload.parentId = undefined;
-      }
-
-      if (editingId) {
-        await updateCategory(editingId, payload);
-        toast.success("Категория обновлена");
-      } else {
-        await createCategory(payload);
-        toast.success("Категория создана");
-      }
-      setDialogOpen(false);
-      loadCategories(true);
-    } catch {
-      toast.error("Ошибка сохранения");
-    } finally {
-      setSaving(false);
-    }
-  };
+  const handleSaved = useCallback(() => {
+    loadCategories(true);
+  }, [loadCategories]);
 
   const handleDelete = async () => {
     if (!deleteId) return;
@@ -354,148 +234,13 @@ export default function CategoriesPage() {
         </div>
       )}
 
-      {/* Create / Edit Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-4xl bg-card border-border max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {editingId ? "Редактировать категорию" : "Новая категория"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 mt-4">
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Имя *</Label>
-                <Input
-                  value={form.name}
-                  onChange={(e) => {
-                    const name = e.target.value;
-                    setForm((f) => ({
-                      ...f,
-                      name,
-                      slug: editingId ? f.slug : generateSlug(name),
-                    }));
-                  }}
-                  placeholder="Электроника и гаджеты"
-                  className="bg-muted/50"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Slug *</Label>
-                <div className="flex gap-2 items-center">
-                  <Input
-                    value={form.slug}
-                    onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value }))}
-                    placeholder="electronics"
-                    className="bg-muted/50 font-mono text-sm"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    title="Регенерировать уникальный слаг из названия"
-                    onClick={async () => {
-                      const slug = await generateUniqueSlug(form.name, (s) =>
-                        checkCategorySlugExists(s, editingId ?? undefined),
-                      );
-                      setForm((f) => ({ ...f, slug }));
-                    }}
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="min-h-5 text-xs">
-                  {slugChecking && (
-                    <p className="text-muted-foreground">Проверка слага...</p>
-                  )}
-                  {!slugChecking && slugExists && (
-                    <p className="text-destructive">Слаг уже используется</p>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="space-y-2">
-                <Label>Полное имя</Label>
-              <Input
-                value={form.fullName}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, fullName: e.target.value }))
-                }
-                placeholder="Электроника и гаджеты"
-                className="bg-muted/50"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Описание</Label>
-              <Textarea
-                value={form.description}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, description: e.target.value }))
-                }
-                placeholder="Описание категории..."
-                className="bg-muted/50 resize-none"
-                rows={3}
-              />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Родительская категория</Label>
-                <Select
-                  value={form.parentId || "0"}
-                  onValueChange={(val) =>
-                    setForm((f) => ({ ...f, parentId: val === "0" ? "" : val }))
-                  }
-                >
-                  <SelectTrigger className="bg-muted/50 w-full overflow-hidden">
-                    <SelectValue placeholder="Выберите родителя..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="0">
-                      <span className="text-muted-foreground italic">
-                        Корневая категория (без родителя)
-                      </span>
-                    </SelectItem>
-                    {allCategories
-                      .filter((c) => c.id !== editingId) // Prevent selecting self as parent
-                      .map((c) => (
-                        <SelectItem key={c.id} value={String(c.id)}>
-                          {c.name}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground mt-1 max-w-full leading-relaxed">
-                  Выберите категорию, в которую будет вложена текущая
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label>Сортировка</Label>
-                <Input
-                  type="number"
-                  value={form.sortOrder}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, sortOrder: e.target.value }))
-                  }
-                  placeholder="0"
-                  className="bg-muted/50"
-                />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>
-                Отмена
-              </Button>
-              <Button
-                onClick={handleSave}
-                disabled={saving}
-                className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500"
-              >
-                {saving ? "Сохранение..." : editingId ? "Обновить" : "Создать"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <CategoryFormDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        category={editingCategory}
+        allCategories={allCategories}
+        onSaved={handleSaved}
+      />
 
       <DeleteDialog
         open={!!deleteId}

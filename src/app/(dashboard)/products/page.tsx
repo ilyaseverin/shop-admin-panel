@@ -1,29 +1,14 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   getProductsAll,
-  getProduct,
   getCategories,
-  createProduct,
-  updateProduct,
   deleteProduct,
-  uploadImage,
   getImageUrl,
-  checkProductSlugExists,
 } from "@/lib/api";
-import { generateSlug, generateUniqueSlug } from "@/lib/slug";
-import { useDebounce } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -36,60 +21,9 @@ import { Badge } from "@/components/ui/badge";
 import { DeleteDialog } from "@/components/delete-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import {
-  Plus,
-  Pencil,
-  Trash2,
-  Upload,
-  X,
-  Star,
-  Image as ImageIcon,
-  Search,
-  RefreshCw,
-} from "lucide-react";
-
-interface ProductImage {
-  url: string;
-  type: string;
-}
-
-interface Product {
-  id: number;
-  name: string;
-  fullName?: string;
-  slug: string;
-  description?: string;
-  price: number;
-  categoryId: number;
-  sortOrder: number;
-  images: ProductImage[];
-}
-
-interface Category {
-  id: number;
-  name: string;
-  slug: string;
-}
-
-interface ProductForm {
-  name: string;
-  fullName: string;
-  slug: string;
-  description: string;
-  price: string;
-  categoryId: string;
-  sortOrder: string;
-}
-
-const emptyForm: ProductForm = {
-  name: "",
-  fullName: "",
-  slug: "",
-  description: "",
-  price: "",
-  categoryId: "",
-  sortOrder: "",
-};
+import { Plus, Pencil, Trash2, Search } from "lucide-react";
+import type { Product, Category } from "./types";
+import { ProductFormDialog } from "./components/ProductFormDialog";
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -98,32 +32,10 @@ export default function ProductsPage() {
   const [search, setSearch] = useState("");
 
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState<ProductForm>(emptyForm);
-  const [saving, setSaving] = useState(false);
-  const [slugExists, setSlugExists] = useState(false);
-  const [slugChecking, setSlugChecking] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
-
-  // Image upload state: при создании файлы грузятся при Save; при редактировании — сразу
-  const [uploadedImages, setUploadedImages] = useState<ProductImage[]>([]);
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [categorySearch, setCategorySearch] = useState("");
-  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
-  const [categorySearchResults, setCategorySearchResults] = useState<
-    Category[]
-  >([]);
-  const [categorySearchLoading, setCategorySearchLoading] = useState(false);
-  const [categorySearchPage, setCategorySearchPage] = useState(1);
-  const [categorySearchTotal, setCategorySearchTotal] = useState(0);
-  const [selectedCategoryName, setSelectedCategoryName] = useState("");
-  const categoryListRef = useRef<HTMLDivElement>(null);
-  const categorySearchLimit = 5;
-  const debouncedCategorySearch = useDebounce(categorySearch, 300);
 
   const loadData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -146,203 +58,33 @@ export default function ProductsPage() {
   }, [loadData]);
 
   const openCreate = () => {
-    setEditingId(null);
-    setForm(emptyForm);
-    setUploadedImages([]);
-    setPendingFiles([]);
-    setSlugExists(false);
-    setCategorySearch("");
-    setSelectedCategoryName("");
-    setCategorySearchPage(1);
+    setEditingProduct(null);
     setDialogOpen(true);
   };
 
   const openEdit = (product: Product) => {
-    setEditingId(product.id);
-    setForm({
-      name: product.name || "",
-      fullName: product.fullName || "",
-      slug: product.slug || "",
-      description: product.description || "",
-      price: String(product.price || ""),
-      categoryId: String(product.categoryId || ""),
-      sortOrder: String(product.sortOrder || ""),
-    });
-    setUploadedImages(product.images || []);
-    setPendingFiles([]);
-    setSlugExists(false);
-    setCategorySearch("");
-    setSelectedCategoryName(
-      categories.find((c) => c.id === product.categoryId)?.name || "",
-    );
+    setEditingProduct(product);
     setDialogOpen(true);
   };
 
-  // Проверка занятости слага (с debounce)
-  useEffect(() => {
-    if (!dialogOpen || !form.slug?.trim()) {
-      setSlugExists(false);
-      return;
-    }
-    const t = setTimeout(async () => {
-      setSlugChecking(true);
-      try {
-        const exists = await checkProductSlugExists(
-          form.slug.trim(),
-          editingId ?? undefined,
+  const handleSaved = useCallback(
+    (updatedProduct?: Product) => {
+      if (updatedProduct) {
+        setProducts((prev) =>
+          prev.some((p) => p.id === updatedProduct.id)
+            ? prev.map((p) =>
+                p.id === updatedProduct.id
+                  ? { ...p, ...updatedProduct, images: updatedProduct.images }
+                  : p
+              )
+            : [...prev, updatedProduct]
         );
-        setSlugExists(exists);
-      } catch {
-        setSlugExists(false);
-      } finally {
-        setSlugChecking(false);
-      }
-    }, 400);
-    return () => clearTimeout(t);
-  }, [dialogOpen, form.slug, editingId]);
-
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    for (const file of Array.from(files)) {
-      const blobUrl = URL.createObjectURL(file);
-      setPendingFiles((prev) => [...prev, file]);
-      setUploadedImages((prev) => [...prev, { url: blobUrl, type: "product" }]);
-    }
-    toast.success("Изображение добавлено (загрузится при сохранении)");
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const removeImage = (index: number) => {
-    setUploadedImages((prev) => {
-      const removed = prev[index];
-      const isBlob = removed?.url.startsWith("blob:");
-      if (isBlob && removed) URL.revokeObjectURL(removed.url);
-      const blobIndex = isBlob
-        ? prev.slice(0, index).filter((img) => img.url.startsWith("blob:"))
-            .length
-        : -1;
-      if (blobIndex >= 0)
-        setPendingFiles((p) => p.filter((_, i) => i !== blobIndex));
-      return prev.filter((_, i) => i !== index);
-    });
-  };
-
-  const setMainImage = (index: number) => {
-    setUploadedImages((prev) =>
-      prev.map((img, i) => ({
-        ...img,
-        type: i === index ? "main" : "product",
-      })),
-    );
-  };
-
-  const handleSave = async () => {
-    if (!form.name || !form.slug || !form.price || !form.categoryId) {
-      toast.error("Заполните обязательные поля (Имя, Slug, Цена, Категория)");
-      return;
-    }
-    if (slugExists) {
-      toast.error("Этот слаг уже используется. Выберите другой.");
-      return;
-    }
-    setSaving(true);
-    try {
-      const payload = {
-        name: form.name,
-        slug: form.slug,
-        price: Number(form.price),
-        categoryId: Number(form.categoryId),
-        fullName: form.fullName || undefined,
-        description: form.description || undefined,
-        sortOrder: form.sortOrder ? Number(form.sortOrder) : undefined,
-      };
-
-      if (editingId) {
-        await updateProduct(editingId, payload);
-        const blobImages = uploadedImages.filter((img) =>
-          img.url.startsWith("blob:"),
-        );
-        if (pendingFiles.length > 0) {
-          setUploading(true);
-          try {
-            for (let i = 0; i < pendingFiles.length; i++) {
-              await uploadImage(pendingFiles[i], {
-                entityType: "catalog.product",
-                entityId: String(editingId),
-                imageType: blobImages[i]?.type || "product",
-              });
-            }
-          } finally {
-            setUploading(false);
-          }
-        }
-        toast.success("Товар обновлён");
-        setDialogOpen(false);
-        loadData(true);
       } else {
-        const created = await createProduct(payload);
-        const newId = created?.id ?? created?.data?.id;
-        if (newId == null) {
-          toast.success("Товар создан");
-          setDialogOpen(false);
-          loadData(true);
-          return;
-        }
-        if (pendingFiles.length > 0) {
-          setUploading(true);
-          try {
-            const blobImages = uploadedImages.filter((img) =>
-              img.url.startsWith("blob:"),
-            );
-            for (let i = 0; i < pendingFiles.length; i++) {
-              await uploadImage(pendingFiles[i], {
-                entityType: "catalog.product",
-                entityId: String(newId),
-                imageType: blobImages[i]?.type || "product",
-              });
-            }
-          } finally {
-            setUploading(false);
-          }
-        }
-        toast.success("Товар создан");
-        setDialogOpen(false);
-        await loadData(true);
-        const expectedImages = pendingFiles.length;
-        const fetchProductWithImages = async (attempt = 0): Promise<void> => {
-          const maxAttempts = 5;
-          const delayMs = 600;
-          try {
-            const fullProduct = await getProduct(newId);
-            const images = fullProduct?.images ?? [];
-            const hasAll =
-              expectedImages === 0 || images.length >= expectedImages;
-            setProducts((prev) =>
-              prev.some((p) => p.id === newId)
-                ? prev.map((p) => (p.id === newId ? { ...p, images } : p))
-                : [...prev, { ...fullProduct, id: newId, images } as Product],
-            );
-            if (!hasAll && attempt < maxAttempts - 1) {
-              await new Promise((r) => setTimeout(r, delayMs));
-              return fetchProductWithImages(attempt + 1);
-            }
-          } catch {
-            if (attempt < maxAttempts - 1) {
-              await new Promise((r) => setTimeout(r, delayMs));
-              return fetchProductWithImages(attempt + 1);
-            }
-          }
-        };
-        await fetchProductWithImages();
+        loadData(true);
       }
-    } catch {
-      toast.error("Ошибка сохранения");
-    } finally {
-      setSaving(false);
-    }
-  };
+    },
+    [loadData]
+  );
 
   const handleDelete = async () => {
     if (!deleteId) return;
@@ -362,37 +104,6 @@ export default function ProductsPage() {
   const getCategoryName = (id: number) => {
     return categories.find((c) => c.id === id)?.name || `#${id}`;
   };
-
-  useEffect(() => {
-    if (!categoryDropdownOpen) return;
-    let cancelled = false;
-    setCategorySearchLoading(true);
-    getCategories({
-      page: categorySearchPage,
-      limit: categorySearchLimit,
-      name: debouncedCategorySearch.trim() || undefined,
-    })
-      .then((data) => {
-        if (cancelled) return;
-        const items = (data as { items?: Category[] }).items ?? [];
-        const total =
-          (data as { meta?: { total?: number } }).meta?.total ?? items.length;
-        setCategorySearchResults(items);
-        setCategorySearchTotal(total);
-      })
-      .catch(() => {
-        if (!cancelled) setCategorySearchResults([]);
-      })
-      .finally(() => {
-        if (!cancelled) setCategorySearchLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [categoryDropdownOpen, debouncedCategorySearch, categorySearchPage]);
-
-  const categorySearchTotalPages =
-    Math.ceil(categorySearchTotal / categorySearchLimit) || 1;
 
   const filteredProducts = search
     ? products.filter((p) =>
@@ -547,334 +258,13 @@ export default function ProductsPage() {
         </Table>
       </div>
 
-      {/* Create / Edit Dialog */}
-      <Dialog
+      <ProductFormDialog
         open={dialogOpen}
-        onOpenChange={(open) => {
-          setDialogOpen(open);
-          if (!open) {
-            setCategorySearch("");
-            setCategoryDropdownOpen(false);
-            setSelectedCategoryName("");
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-4xl bg-card border-border max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {editingId ? "Редактировать товар" : "Новый товар"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 mt-4">
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Название *</Label>
-                <Input
-                  value={form.name}
-                  onChange={(e) => {
-                    const name = e.target.value;
-                    setForm((f) => ({
-                      ...f,
-                      name,
-                      slug: editingId ? f.slug : generateSlug(name),
-                    }));
-                  }}
-                  placeholder="Смартфон XYZ Pro 256GB"
-                  className="bg-muted/50"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Slug *</Label>
-                <div className="flex gap-2 items-center">
-                  <Input
-                    value={form.slug}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, slug: e.target.value }))
-                    }
-                    placeholder="smartphone-xyz"
-                    className="bg-muted/50 font-mono text-sm"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    title="Регенерировать уникальный слаг из названия"
-                    onClick={async () => {
-                      const slug = await generateUniqueSlug(form.name, (s) =>
-                        checkProductSlugExists(s, editingId ?? undefined),
-                      );
-                      setForm((f) => ({ ...f, slug }));
-                    }}
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="min-h-5 text-xs">
-                  {slugChecking && (
-                    <p className="text-muted-foreground">Проверка слага...</p>
-                  )}
-                  {!slugChecking && slugExists && (
-                    <p className="text-destructive">Слаг уже используется</p>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Полное название</Label>
-              <Input
-                value={form.fullName}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, fullName: e.target.value }))
-                }
-                placeholder="Смартфон XYZ Pro 256GB"
-                className="bg-muted/50"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Описание</Label>
-              <Textarea
-                value={form.description}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, description: e.target.value }))
-                }
-                placeholder="Описание товара..."
-                className="bg-muted/50 resize-none"
-                rows={3}
-              />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Цена *</Label>
-                <Input
-                  type="number"
-                  value={form.price}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, price: e.target.value }))
-                  }
-                  placeholder="9990"
-                  className="bg-muted/50"
-                />
-              </div>
-              <div className="space-y-2" ref={categoryListRef}>
-                <Label>Категория *</Label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                  <Input
-                    value={
-                      form.categoryId
-                        ? ((selectedCategoryName ||
-                            categories.find(
-                              (c) => c.id === Number(form.categoryId),
-                            )?.name) ??
-                          categorySearch)
-                        : categorySearch
-                    }
-                    onChange={(e) => {
-                      setCategorySearch(e.target.value);
-                      setCategoryDropdownOpen(true);
-                      setCategorySearchPage(1);
-                      if (form.categoryId) {
-                        setForm((f) => ({ ...f, categoryId: "" }));
-                        setSelectedCategoryName("");
-                      }
-                    }}
-                    onFocus={() => setCategoryDropdownOpen(true)}
-                    onBlur={() =>
-                      setTimeout(() => setCategoryDropdownOpen(false), 200)
-                    }
-                    placeholder="Поиск по имени или slug..."
-                    className="pl-9 bg-muted/50"
-                  />
-                  {categoryDropdownOpen && (
-                    <div
-                      className="absolute left-0 right-0 top-full z-50 mt-1 rounded-md border bg-popover shadow-lg max-h-48 overflow-auto"
-                      onMouseDown={(e) => e.preventDefault()}
-                    >
-                      {categorySearchLoading ? (
-                        <div className="px-3 py-4 text-sm text-muted-foreground text-center">
-                          Поиск…
-                        </div>
-                      ) : categorySearchResults.length === 0 ? (
-                        <div className="px-3 py-4 text-sm text-muted-foreground text-center">
-                          {debouncedCategorySearch.trim()
-                            ? "Нет подходящих категорий"
-                            : "Введите имя или slug для поиска"}
-                        </div>
-                      ) : (
-                        <>
-                          <ul className="p-1">
-                            {categorySearchResults.map((cat) => (
-                              <li key={cat.id}>
-                                <button
-                                  type="button"
-                                  className="w-full text-left px-3 py-2 text-sm rounded-sm hover:bg-accent focus:bg-accent focus:outline-none"
-                                  onClick={() => {
-                                    setForm((f) => ({
-                                      ...f,
-                                      categoryId: String(cat.id),
-                                    }));
-                                    setSelectedCategoryName(cat.name || "");
-                                    setCategorySearch("");
-                                    setCategoryDropdownOpen(false);
-                                  }}
-                                >
-                                  {cat.name}
-                                  {cat.slug && (
-                                    <span className="text-muted-foreground ml-2 text-xs">
-                                      {cat.slug}
-                                    </span>
-                                  )}
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                          {categorySearchTotalPages > 1 && (
-                            <div className="flex items-center justify-between gap-2 px-2 py-2 border-t text-sm">
-                              <span className="text-muted-foreground">
-                                {categorySearchTotal} всего
-                              </span>
-                              <div className="flex gap-1">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 px-2"
-                                  disabled={categorySearchPage <= 1}
-                                  onClick={() =>
-                                    setCategorySearchPage((p) =>
-                                      Math.max(1, p - 1),
-                                    )
-                                  }
-                                >
-                                  Назад
-                                </Button>
-                                <span className="flex items-center px-2 text-muted-foreground">
-                                  {categorySearchPage} /{" "}
-                                  {categorySearchTotalPages}
-                                </span>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 px-2"
-                                  disabled={
-                                    categorySearchPage >=
-                                    categorySearchTotalPages
-                                  }
-                                  onClick={() =>
-                                    setCategorySearchPage((p) =>
-                                      Math.min(categorySearchTotalPages, p + 1),
-                                    )
-                                  }
-                                >
-                                  Вперёд
-                                </Button>
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Image Upload Section */}
-            <div className="space-y-3">
-              <Label className="text-sm font-medium">Изображения</Label>
-              <div className="border border-dashed border-border/70 rounded-xl p-4 space-y-3">
-                {uploadedImages.length > 0 && (
-                  <div className="flex flex-wrap gap-3">
-                    {uploadedImages.map((img, idx) => (
-                      <div
-                        key={idx}
-                        className="relative w-20 h-20 rounded-lg bg-muted overflow-hidden group/img border border-border"
-                      >
-                        <img
-                          src={
-                            img.url.startsWith("blob:")
-                              ? img.url
-                              : getImageUrl(img.url)
-                          }
-                          alt=""
-                          className="w-full h-full object-cover"
-                        />
-                        {img.type === "main" && (
-                          <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-amber-500/90 text-white text-[10px] font-medium flex items-center gap-0.5">
-                            <Star className="w-2.5 h-2.5 fill-current" />
-                            Главное
-                          </span>
-                        )}
-                        <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover/img:opacity-100 transition-opacity">
-                          <button
-                            type="button"
-                            onClick={() => setMainImage(idx)}
-                            title="Сделать главным"
-                            className="w-5 h-5 bg-muted hover:bg-amber-500 rounded-full flex items-center justify-center text-muted-foreground hover:text-white"
-                          >
-                            <Star className="w-3 h-3" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeImage(idx)}
-                            className="w-5 h-5 bg-destructive rounded-full flex items-center justify-center text-white"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div
-                  className="flex flex-col items-center gap-2 py-4 cursor-pointer hover:bg-muted/50 rounded-lg transition-colors"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  {uploading ? (
-                    <div className="w-8 h-8 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
-                        <Upload className="w-5 h-5 text-muted-foreground" />
-                      </div>
-                      <div className="text-center">
-                        <p className="text-sm text-muted-foreground">
-                          Нажмите для загрузки
-                        </p>
-                        <p className="text-xs text-muted-foreground/60">
-                          PNG, JPG, WebP
-                        </p>
-                      </div>
-                    </>
-                  )}
-                </div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={handleImageUpload}
-                  className="hidden"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>
-                Отмена
-              </Button>
-              <Button
-                onClick={handleSave}
-                disabled={saving}
-                className="bg-linear-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500"
-              >
-                {saving ? "Сохранение..." : editingId ? "Обновить" : "Создать"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+        onOpenChange={setDialogOpen}
+        product={editingProduct}
+        categories={categories}
+        onSaved={handleSaved}
+      />
 
       <DeleteDialog
         open={!!deleteId}

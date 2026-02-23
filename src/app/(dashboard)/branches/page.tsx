@@ -3,22 +3,10 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   getBranches,
-  createBranch,
-  updateBranch,
   deleteBranch,
   restoreBranch,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -27,7 +15,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { DeleteDialog } from "@/components/delete-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
@@ -38,47 +25,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Plus, Pencil, Trash2 } from "lucide-react";
-
-interface Branch {
-  id: number;
-  name: string;
-  description?: string;
-  address: string;
-  city?: string;
-  region?: string;
-  phone?: string;
-  isActive?: boolean;
-}
-
-interface BranchForm {
-  name: string;
-  address: string;
-  description: string;
-  city: string;
-  region: string;
-  phone: string;
-  isActive: boolean;
-}
-
-const emptyForm: BranchForm = {
-  name: "",
-  address: "",
-  description: "",
-  city: "",
-  region: "",
-  phone: "",
-  isActive: true,
-};
+import type { Branch } from "./types";
+import { BranchFormDialog } from "./components/BranchFormDialog";
 
 export default function BranchesPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState<BranchForm>(emptyForm);
-  const [saving, setSaving] = useState(false);
+  const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
 
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -114,56 +71,18 @@ export default function BranchesPage() {
   }, [loadBranches]);
 
   const openCreate = () => {
-    setEditingId(null);
-    setForm(emptyForm);
+    setEditingBranch(null);
     setDialogOpen(true);
   };
 
   const openEdit = (branch: Branch) => {
-    setEditingId(branch.id);
-    setForm({
-      name: branch.name || "",
-      address: branch.address || "",
-      description: branch.description || "",
-      city: branch.city || "",
-      region: branch.region || "",
-      phone: branch.phone || "",
-      isActive: branch.isActive ?? true,
-    });
+    setEditingBranch(branch);
     setDialogOpen(true);
   };
 
-  const handleSave = async () => {
-    if (!form.name || !form.address) {
-      toast.error("Заполните обязательные поля (Название и Адрес)");
-      return;
-    }
-    setSaving(true);
-    try {
-      const payload = {
-        name: form.name,
-        address: form.address,
-        description: form.description || undefined,
-        city: form.city || undefined,
-        region: form.region || undefined,
-        phone: form.phone || undefined,
-        isActive: form.isActive,
-      };
-      if (editingId) {
-        await updateBranch(editingId, payload);
-        toast.success("Филиал обновлён");
-      } else {
-        await createBranch(payload);
-        toast.success("Филиал создан");
-      }
-      setDialogOpen(false);
-      loadBranches(true);
-    } catch {
-      toast.error("Ошибка сохранения");
-    } finally {
-      setSaving(false);
-    }
-  };
+  const handleSaved = useCallback(() => {
+    loadBranches(true);
+  }, [loadBranches]);
 
   const handleToggleActive = async (branch: Branch) => {
     setTogglingId(branch.id);
@@ -331,108 +250,12 @@ export default function BranchesPage() {
         </Table>
       </div>
 
-      {/* Create / Edit Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-4xl bg-card border-border max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {editingId ? "Редактировать филиал" : "Новый филиал"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 mt-4">
-            <div className="space-y-2">
-              <Label>Название *</Label>
-              <Input
-                value={form.name}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, name: e.target.value }))
-                }
-                placeholder="Центральный офис"
-                className="bg-muted/50"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Адрес *</Label>
-              <Input
-                value={form.address}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, address: e.target.value }))
-                }
-                placeholder="ул. Примерная, д. 1"
-                className="bg-muted/50"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Описание</Label>
-              <Textarea
-                value={form.description}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, description: e.target.value }))
-                }
-                placeholder="Описание филиала..."
-                className="bg-muted/50 resize-none"
-                rows={2}
-              />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Город</Label>
-                <Input
-                  value={form.city}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, city: e.target.value }))
-                  }
-                  placeholder="Москва"
-                  className="bg-muted/50"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Регион</Label>
-                <Input
-                  value={form.region}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, region: e.target.value }))
-                  }
-                  placeholder="Московская область"
-                  className="bg-muted/50"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Телефон</Label>
-              <Input
-                value={form.phone}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, phone: e.target.value }))
-                }
-                placeholder="+7 (999) 123-45-67"
-                className="bg-muted/50"
-              />
-            </div>
-            <div className="flex items-center gap-3">
-              <Switch
-                checked={form.isActive}
-                onCheckedChange={(checked) =>
-                  setForm((f) => ({ ...f, isActive: checked }))
-                }
-              />
-              <Label>Филиал активен</Label>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>
-                Отмена
-              </Button>
-              <Button
-                onClick={handleSave}
-                disabled={saving}
-                className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500"
-              >
-                {saving ? "Сохранение..." : editingId ? "Обновить" : "Создать"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <BranchFormDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        branch={editingBranch}
+        onSaved={handleSaved}
+      />
 
       <DeleteDialog
         open={!!deleteId}
