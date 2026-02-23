@@ -116,18 +116,24 @@ export async function updateCategory(
     sortOrder?: number;
   },
 ) {
-  const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/categories/${id}`, {
-    method: "PATCH",
-    body: JSON.stringify(data),
-  });
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/categories/${id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    },
+  );
   if (!res.ok) throw new Error("Ошибка обновления категории");
   return res.json();
 }
 
 export async function deleteCategory(id: number) {
-  const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/categories/${id}`, {
-    method: "DELETE",
-  });
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/categories/${id}`,
+    {
+      method: "DELETE",
+    },
+  );
   if (!res.ok) throw new Error("Ошибка удаления категории");
 }
 
@@ -168,9 +174,20 @@ export async function getProducts(params?: {
 
 /** Все товары одним запросом (для списков без пагинации). */
 export async function getProductsAll(): Promise<
-  { id: number; name?: string; fullName?: string; slug?: string; price?: number; categoryId?: number; sortOrder?: number; images?: { url: string; type: string }[] }[]
+  {
+    id: number;
+    name?: string;
+    fullName?: string;
+    slug?: string;
+    price?: number;
+    categoryId?: number;
+    sortOrder?: number;
+    images?: { url: string; type: string }[];
+  }[]
 > {
-  const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/products?limit=5000`);
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/products?limit=5000`,
+  );
   if (!res.ok) throw new Error("Ошибка загрузки товаров");
   const data = await res.json();
   return Array.isArray(data) ? data : (data?.items ?? []);
@@ -249,7 +266,8 @@ export async function getBranches(params?: {
   const query = new URLSearchParams();
   query.set("page", String(params?.page ?? 1));
   query.set("limit", String(params?.limit ?? 5000));
-  if (params?.isActive !== undefined) query.set("isActive", String(params.isActive));
+  if (params?.isActive !== undefined)
+    query.set("isActive", String(params.isActive));
   const url = `${CATALOG_PROXY}/api/admin/branches?${query.toString()}`;
   const res = await fetchWithAuth(url);
   if (!res.ok) throw new Error("Ошибка загрузки филиалов");
@@ -324,7 +342,8 @@ export async function getBranchProducts(params?: {
   limit?: number;
 }) {
   const query = new URLSearchParams();
-  if (params?.isActive !== undefined) query.set("isActive", String(params.isActive));
+  if (params?.isActive !== undefined)
+    query.set("isActive", String(params.isActive));
   if (params?.page != null) query.set("page", String(params.page));
   if (params?.limit != null) query.set("limit", String(params.limit));
   const qs = query.toString();
@@ -337,7 +356,14 @@ export async function getBranchProducts(params?: {
 
 /** Загружает все привязки (и активные, и неактивные). Бэкенд может отдавать по isActive отдельно. */
 export async function getAllBranchProducts(): Promise<
-  { id: number; productId: number; branchId: number; price: number; stock: number; isActive: boolean }[]
+  {
+    id: number;
+    productId: number;
+    branchId: number;
+    price: number;
+    stock: number;
+    isActive: boolean;
+  }[]
 > {
   const [activeRes, inactiveRes] = await Promise.all([
     getBranchProducts({ isActive: true, limit: 5000 }),
@@ -345,7 +371,17 @@ export async function getAllBranchProducts(): Promise<
   ]);
   const active = Array.isArray(activeRes) ? activeRes : [];
   const inactive = Array.isArray(inactiveRes) ? inactiveRes : [];
-  const byId = new Map<number, { id: number; productId: number; branchId: number; price: number; stock: number; isActive: boolean }>();
+  const byId = new Map<
+    number,
+    {
+      id: number;
+      productId: number;
+      branchId: number;
+      price: number;
+      stock: number;
+      isActive: boolean;
+    }
+  >();
   for (const row of [...active, ...inactive]) {
     byId.set(row.id, { ...row, isActive: row.isActive ?? true });
   }
@@ -359,10 +395,13 @@ export async function createBranchProduct(data: {
   stock?: number;
   isActive?: boolean;
 }) {
-  const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/branch-products`, {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/branch-products`,
+    {
+      method: "POST",
+      body: JSON.stringify(data),
+    },
+  );
   if (!res.ok) {
     const err = new Error("Ошибка привязки товара к филиалу") as Error & {
       status?: number;
@@ -379,10 +418,13 @@ export async function updateBranchProduct(
   id: number,
   data: { price?: number; stock?: number; isActive?: boolean },
 ) {
-  const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/branch-products/${id}`, {
-    method: "PATCH",
-    body: JSON.stringify(data),
-  });
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/branch-products/${id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    },
+  );
   if (!res.ok) {
     const text = await res.text();
     let msg = "Ошибка обновления товара в филиале";
@@ -400,9 +442,12 @@ export async function updateBranchProduct(
 }
 
 export async function deleteBranchProduct(id: number) {
-  const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/branch-products/${id}`, {
-    method: "DELETE",
-  });
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/branch-products/${id}`,
+    {
+      method: "DELETE",
+    },
+  );
   if (!res.ok) {
     const text = await res.text();
     throw Object.assign(new Error("Ошибка отвязки товара от филиала"), {

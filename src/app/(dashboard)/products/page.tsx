@@ -321,9 +321,7 @@ export default function ProductsPage() {
               expectedImages === 0 || images.length >= expectedImages;
             setProducts((prev) =>
               prev.some((p) => p.id === newId)
-                ? prev.map((p) =>
-                    p.id === newId ? { ...p, images } : p,
-                  )
+                ? prev.map((p) => (p.id === newId ? { ...p, images } : p))
                 : [...prev, { ...fullProduct, id: newId, images } as Product],
             );
             if (!hasAll && attempt < maxAttempts - 1) {
@@ -863,20 +861,16 @@ export default function ProductsPage() {
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-                <Button variant="outline" onClick={() => setDialogOpen(false)}>
-                  Отмена
-                </Button>
-                <Button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="bg-linear-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500"
-                >
-                  {saving
-                    ? "Сохранение..."
-                    : editingId
-                      ? "Обновить"
-                      : "Создать"}
-                </Button>
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>
+                Отмена
+              </Button>
+              <Button
+                onClick={handleSave}
+                disabled={saving}
+                className="bg-linear-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500"
+              >
+                {saving ? "Сохранение..." : editingId ? "Обновить" : "Создать"}
+              </Button>
             </div>
           </div>
         </DialogContent>
