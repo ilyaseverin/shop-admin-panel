@@ -9,6 +9,9 @@ import {
   getImageUrl,
   getProduct,
   checkProductSlugExists,
+  updateImageType,
+  deleteImage,
+  getImageDetails,
 } from "@/lib/api";
 import { generateSlug, generateUniqueSlug } from "@/lib/slug";
 import { useDebounce } from "@/lib/utils";
@@ -16,6 +19,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -23,14 +28,30 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Upload, X, Star, Search, RefreshCw } from "lucide-react";
-import type { Product, ProductImage, Category, ProductForm } from "../types";
+import {
+  Upload,
+  X,
+  Star,
+  Search,
+  RefreshCw,
+  Plus,
+  Trash2,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
+import type { Product, ProductImage, Category, ProductForm, LocalVariantGroup, LocalVariantOption } from "../types";
 import { emptyProductForm } from "../types";
+import { VariantManager } from "./VariantManager";
 
 const CATEGORY_SEARCH_LIMIT = 5;
 const SLUG_CHECK_DELAY_MS = 400;
 const FETCH_PRODUCT_ATTEMPTS = 5;
 const FETCH_PRODUCT_DELAY_MS = 600;
+
+let _keyCounter = 0;
+function nextKey() {
+  return `_k${++_keyCounter}`;
+}
 
 interface ProductFormDialogProps {
   open: boolean;
@@ -58,6 +79,9 @@ export function ProductFormDialog({
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Original image types from server (to detect changes on save)
+  const originalImageTypesRef = useRef<Map<string, string>>(new Map());
+
   const [categorySearch, setCategorySearch] = useState("");
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const [categorySearchResults, setCategorySearchResults] = useState<Category[]>([]);
@@ -66,11 +90,16 @@ export function ProductFormDialog({
   const [categorySearchTotal, setCategorySearchTotal] = useState(0);
   const [selectedCategoryName, setSelectedCategoryName] = useState("");
 
+  // Local variant groups (for creation mode)
+  const [localGroups, setLocalGroups] = useState<LocalVariantGroup[]>([]);
+  const [expandedLocalGroups, setExpandedLocalGroups] = useState<Set<string>>(new Set());
+
   const debouncedCategorySearch = useDebounce(categorySearch, 300);
 
   // Init form when dialog opens or product changes
   useEffect(() => {
     if (!open) return;
+    originalImageTypesRef.current = new Map();
     if (product) {
       setForm({
         name: product.name || "",
@@ -81,8 +110,30 @@ export function ProductFormDialog({
         categoryId: String(product.categoryId ?? ""),
         sortOrder: String(product.sortOrder ?? ""),
       });
-      setUploadedImages(product.images || []);
+      // Load images and fetch real imageType from image service
+      const images = product.images || [];
+      setUploadedImages(images);
       setPendingFiles([]);
+      if (images.length > 0) {
+        Promise.all(
+          images.map(async (img) => {
+            try {
+              const details = await getImageDetails(img.url);
+              return { url: img.url, type: details.imageType || img.type };
+            } catch {
+              return img;
+            }
+          })
+        ).then((updated) => {
+          // Store original types from image service
+          const map = new Map<string, string>();
+          for (const img of updated) {
+            map.set(img.url, img.type);
+          }
+          originalImageTypesRef.current = map;
+          setUploadedImages(updated);
+        });
+      }
       setSelectedCategoryName(
         categories.find((c) => c.id === product.categoryId)?.name || ""
       );
@@ -92,6 +143,8 @@ export function ProductFormDialog({
       setPendingFiles([]);
       setSelectedCategoryName("");
     }
+    setLocalGroups([]);
+    setExpandedLocalGroups(new Set());
     setCategorySearch("");
     setCategorySearchPage(1);
     setSlugExists(false);
@@ -160,28 +213,36 @@ export function ProductFormDialog({
       setPendingFiles((prev) => [...prev, file]);
       setUploadedImages((prev) => [...prev, { url: blobUrl, type: "product" }]);
     }
-    toast.success("Изображение добавлено (загрузится при сохранении)");
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const removeImage = (index: number) => {
-    setUploadedImages((prev) => {
-      const removed = prev[index];
-      const isBlob = removed?.url.startsWith("blob:");
-      if (isBlob && removed) URL.revokeObjectURL(removed.url);
-      const blobIndex = isBlob
-        ? prev.slice(0, index).filter((img) => img.url.startsWith("blob:")).length
-        : -1;
-      if (blobIndex >= 0)
-        setPendingFiles((p) => p.filter((_, i) => i !== blobIndex));
-      return prev.filter((_, i) => i !== index);
-    });
+  const removeImage = async (index: number) => {
+    const removed = uploadedImages[index];
+    if (!removed) return;
+    const isBlob = removed.url.startsWith("blob:");
+
+    if (isBlob) {
+      URL.revokeObjectURL(removed.url);
+      const blobIndex = uploadedImages
+        .slice(0, index)
+        .filter((img) => img.url.startsWith("blob:")).length;
+      setPendingFiles((p) => p.filter((_, i) => i !== blobIndex));
+    } else {
+      try {
+        await deleteImage(removed.url);
+      } catch {
+        toast.error("Ошибка удаления изображения");
+        return;
+      }
+    }
+    setUploadedImages((prev) => prev.filter((_, i) => i !== index));
   };
 
+  // Only updates local state — API call happens on save
   const setMainImage = (index: number) => {
     setUploadedImages((prev) =>
-      prev.map((img, i) => ({
-        ...img,
+      prev.map((im, i) => ({
+        ...im,
         type: i === index ? "main" : "product",
       }))
     );
@@ -205,6 +266,71 @@ export function ProductFormDialog({
     return undefined;
   };
 
+  // ---- Local variant groups helpers (creation mode) ----
+  const addLocalGroup = () => {
+    const key = nextKey();
+    setLocalGroups((prev) => [
+      ...prev,
+      { _key: key, name: "", isRequired: false, sortOrder: prev.length, isActive: true, options: [] },
+    ]);
+    setExpandedLocalGroups((prev) => new Set(prev).add(key));
+  };
+
+  const updateLocalGroup = (key: string, patch: Partial<LocalVariantGroup>) => {
+    setLocalGroups((prev) =>
+      prev.map((g) => (g._key === key ? { ...g, ...patch } : g))
+    );
+  };
+
+  const removeLocalGroup = (key: string) => {
+    setLocalGroups((prev) => prev.filter((g) => g._key !== key));
+  };
+
+  const addLocalOption = (groupKey: string) => {
+    setLocalGroups((prev) =>
+      prev.map((g) =>
+        g._key === groupKey
+          ? {
+              ...g,
+              options: [
+                ...g.options,
+                { _key: nextKey(), name: "", priceDelta: 0, sortOrder: g.options.length, isActive: true },
+              ],
+            }
+          : g
+      )
+    );
+  };
+
+  const updateLocalOption = (groupKey: string, optKey: string, patch: Partial<LocalVariantOption>) => {
+    setLocalGroups((prev) =>
+      prev.map((g) =>
+        g._key === groupKey
+          ? { ...g, options: g.options.map((o) => (o._key === optKey ? { ...o, ...patch } : o)) }
+          : g
+      )
+    );
+  };
+
+  const removeLocalOption = (groupKey: string, optKey: string) => {
+    setLocalGroups((prev) =>
+      prev.map((g) =>
+        g._key === groupKey
+          ? { ...g, options: g.options.filter((o) => o._key !== optKey) }
+          : g
+      )
+    );
+  };
+
+  const toggleLocalGroup = (key: string) => {
+    setExpandedLocalGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   const handleSave = async () => {
     if (!form.name || !form.slug || !form.price || !form.categoryId) {
       toast.error("Заполните обязательные поля (Имя, Slug, Цена, Категория)");
@@ -216,7 +342,7 @@ export function ProductFormDialog({
     }
     setSaving(true);
     try {
-      const payload = {
+      const payload: Parameters<typeof createProduct>[0] = {
         name: form.name,
         slug: form.slug,
         price: Number(form.price),
@@ -228,6 +354,8 @@ export function ProductFormDialog({
 
       if (editingId) {
         await updateProduct(editingId, payload);
+
+        // Upload new images
         const blobImages = uploadedImages.filter((img) =>
           img.url.startsWith("blob:")
         );
@@ -245,10 +373,40 @@ export function ProductFormDialog({
             setUploading(false);
           }
         }
+
+        // Update image types that changed (server images only)
+        const origTypes = originalImageTypesRef.current;
+        for (const img of uploadedImages) {
+          if (img.url.startsWith("blob:")) continue;
+          const origType = origTypes.get(img.url);
+          if (origType && origType !== img.type) {
+            await updateImageType(img.url, img.type);
+          }
+        }
+
         toast.success("Товар обновлён");
         onOpenChange(false);
         onSaved();
       } else {
+        // Include local variant groups in creation payload
+        const filledGroups = localGroups.filter((g) => g.name.trim());
+        if (filledGroups.length > 0) {
+          payload.variantGroups = filledGroups.map((g) => ({
+            name: g.name.trim(),
+            isRequired: g.isRequired,
+            sortOrder: g.sortOrder,
+            isActive: g.isActive,
+            options: g.options
+              .filter((o) => o.name.trim())
+              .map((o) => ({
+                name: o.name.trim(),
+                priceDelta: o.priceDelta,
+                sortOrder: o.sortOrder,
+                isActive: o.isActive,
+              })),
+          }));
+        }
+
         const created = await createProduct(payload);
         const newId = created?.id ?? (created as { data?: { id?: number } })?.data?.id;
         if (newId == null) {
@@ -260,14 +418,14 @@ export function ProductFormDialog({
         if (pendingFiles.length > 0) {
           setUploading(true);
           try {
-            const blobImages = uploadedImages.filter((img) =>
+            const blobImgs = uploadedImages.filter((img) =>
               img.url.startsWith("blob:")
             );
             for (let i = 0; i < pendingFiles.length; i++) {
               await uploadImage(pendingFiles[i], {
                 entityType: "catalog.product",
                 entityId: String(newId),
-                imageType: blobImages[i]?.type || "product",
+                imageType: blobImgs[i]?.type || "product",
               });
             }
           } finally {
@@ -602,6 +760,148 @@ export function ProductFormDialog({
                 className="hidden"
               />
             </div>
+          </div>
+
+          {/* Variants Section */}
+          <Separator />
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-medium">Варианты</Label>
+              {!editingId && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10"
+                  onClick={addLocalGroup}
+                >
+                  <Plus className="w-3 h-3 mr-1" />
+                  Добавить группу
+                </Button>
+              )}
+            </div>
+
+            {editingId ? (
+              /* Edit mode — full CRUD via API */
+              <VariantManager productId={editingId} />
+            ) : localGroups.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Нет вариантов. Нажмите «Добавить группу» чтобы добавить (например: Размер, Цвет).
+              </p>
+            ) : (
+              /* Create mode — local inline editor */
+              <div className="space-y-3">
+                {localGroups.map((group) => {
+                  const isExpanded = expandedLocalGroups.has(group._key);
+                  return (
+                    <div
+                      key={group._key}
+                      className="rounded-lg border border-border/50 bg-card/80 overflow-hidden"
+                    >
+                      {/* Group header */}
+                      <div className="flex items-center gap-2 px-3 py-2">
+                        <button
+                          type="button"
+                          className="shrink-0 text-muted-foreground hover:text-foreground"
+                          onClick={() => toggleLocalGroup(group._key)}
+                        >
+                          {isExpanded ? (
+                            <ChevronDown className="w-4 h-4" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4" />
+                          )}
+                        </button>
+                        <Input
+                          value={group.name}
+                          onChange={(e) =>
+                            updateLocalGroup(group._key, { name: e.target.value })
+                          }
+                          placeholder="Название группы (Размер, Цвет...)"
+                          className="bg-muted/50 h-8 text-sm flex-1"
+                        />
+                        <label className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
+                          <Switch
+                            checked={group.isRequired}
+                            onCheckedChange={(v) =>
+                              updateLocalGroup(group._key, { isRequired: v })
+                            }
+                            size="sm"
+                          />
+                          Обяз.
+                        </label>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => removeLocalGroup(group._key)}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+
+                      {/* Options (expanded) */}
+                      {isExpanded && (
+                        <div className="border-t border-border/30 px-3 py-2 space-y-2">
+                          {group.options.map((opt, oi) => (
+                            <div
+                              key={opt._key}
+                              className="flex items-center gap-2"
+                            >
+                              <span className="text-[10px] text-muted-foreground w-4 text-right shrink-0">
+                                {oi + 1}.
+                              </span>
+                              <Input
+                                value={opt.name}
+                                onChange={(e) =>
+                                  updateLocalOption(group._key, opt._key, {
+                                    name: e.target.value,
+                                  })
+                                }
+                                placeholder="Название (S, M, L...)"
+                                className="bg-muted/50 h-7 text-xs flex-1"
+                              />
+                              <Input
+                                type="number"
+                                value={opt.priceDelta || ""}
+                                onChange={(e) =>
+                                  updateLocalOption(group._key, opt._key, {
+                                    priceDelta: Number(e.target.value) || 0,
+                                  })
+                                }
+                                placeholder="Дельта ₽"
+                                className="bg-muted/50 h-7 text-xs w-24"
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+                                onClick={() =>
+                                  removeLocalOption(group._key, opt._key)
+                                }
+                              >
+                                <X className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          ))}
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 text-[11px] text-muted-foreground hover:text-foreground"
+                            onClick={() => addLocalOption(group._key)}
+                          >
+                            <Plus className="w-3 h-3 mr-1" />
+                            Опция
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end gap-2 pt-2">

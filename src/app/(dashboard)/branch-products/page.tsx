@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
+  getBranchProducts,
   getAllBranchProducts,
-  getProductsAll,
+  getProduct,
   getBranches,
   getCategories,
   deleteBranchProduct,
@@ -36,12 +37,17 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import type { BranchProduct, Product, Branch, Category } from "./types";
 import { BranchProductFormDialog } from "./components/BranchProductFormDialog";
 
 export default function BranchProductsPage() {
+  /** Список для таблицы (серверная фильтрация по филиалу и статусу). */
   const [branchProducts, setBranchProducts] = useState<BranchProduct[]>([]);
+  /** Полный список привязок для проверки дубликатов в диалоге. */
+  const [allBranchProducts, setAllBranchProducts] = useState<BranchProduct[]>(
+    [],
+  );
   const [products, setProducts] = useState<Product[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -51,6 +57,8 @@ export default function BranchProductsPage() {
   const [statusFilter, setStatusFilter] = useState<
     "active" | "inactive" | "all"
   >("active");
+  const [bpPage, setBpPage] = useState(1);
+  const [bpTotal, setBpTotal] = useState(0);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<BranchProduct | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
@@ -60,22 +68,45 @@ export default function BranchProductsPage() {
   const loadData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [bpRes, prodRes, branchRes, catRes] = await Promise.all([
+      const branchId =
+        branchFilter === "all" ? undefined : Number(branchFilter);
+      const isActive =
+        statusFilter === "all"
+          ? undefined
+          : statusFilter === "active";
+      const [bpRes, allBpRes, branchRes, catRes] = await Promise.all([
+        getBranchProducts({
+          branchId,
+          isActive,
+          page: bpPage,
+          limit: 25,
+        }),
         getAllBranchProducts(),
-        getProductsAll(),
-        getBranches({ isActive: true }),
-        getCategories({ page: 1, limit: 500 }),
+        getBranches({ isActive: true, limit: 25 }),
+        getCategories({ page: 1, limit: 25 }),
       ]);
-      setBranchProducts(Array.isArray(bpRes) ? bpRes : []);
-      setProducts((Array.isArray(prodRes) ? prodRes : []) as Product[]);
-      setBranches((Array.isArray(branchRes) ? branchRes : []) as Branch[]);
+      const bpItems = Array.isArray(bpRes.items) ? bpRes.items : [];
+      const allBp = Array.isArray(allBpRes) ? allBpRes : [];
+      setBranchProducts(bpItems);
+      setBpTotal(bpRes.meta?.total ?? bpItems.length);
+      setAllBranchProducts(allBp);
+      setBranches((branchRes?.items ?? []) as Branch[]);
       setCategories(catRes?.items ?? []);
+
+      const productIds = [
+        ...new Set([...bpItems, ...allBp].map((bp) => bp.productId)),
+      ];
+      const productsList: Product[] =
+        productIds.length > 0
+          ? await Promise.all(productIds.map((id) => getProduct(id)))
+          : [];
+      setProducts(productsList);
     } catch {
       toast.error("Ошибка загрузки данных");
     } finally {
       if (!silent) setLoading(false);
     }
-  }, []);
+  }, [branchFilter, statusFilter, bpPage]);
 
   useEffect(() => {
     loadData();
@@ -84,20 +115,6 @@ export default function BranchProductsPage() {
   const handleSaved = useCallback(() => {
     loadData(true);
   }, [loadData]);
-
-  const filteredByBranch = useMemo(() => {
-    if (branchFilter === "all") return branchProducts;
-    const id = Number(branchFilter);
-    return branchProducts.filter((bp) => bp.branchId === id);
-  }, [branchProducts, branchFilter]);
-
-  const filteredByBranchAndStatus = useMemo(() => {
-    if (statusFilter === "active")
-      return filteredByBranch.filter((bp) => bp.isActive);
-    if (statusFilter === "inactive")
-      return filteredByBranch.filter((bp) => !bp.isActive);
-    return filteredByBranch;
-  }, [filteredByBranch, statusFilter]);
 
   const getBranchName = (id: number) =>
     branches.find((b) => b.id === id)?.name ?? `#${id}`;
@@ -181,7 +198,13 @@ export default function BranchProductsPage() {
           <Label className="text-sm text-muted-foreground whitespace-nowrap">
             Филиал:
           </Label>
-          <Select value={branchFilter} onValueChange={setBranchFilter}>
+          <Select
+            value={branchFilter}
+            onValueChange={(v) => {
+              setBranchFilter(v);
+              setBpPage(1);
+            }}
+          >
             <SelectTrigger className="w-[220px]">
               <SelectValue placeholder="Все филиалы" />
             </SelectTrigger>
@@ -201,9 +224,10 @@ export default function BranchProductsPage() {
           </Label>
           <Select
             value={statusFilter}
-            onValueChange={(v: "active" | "inactive" | "all") =>
-              setStatusFilter(v)
-            }
+            onValueChange={(v: "active" | "inactive" | "all") => {
+              setStatusFilter(v);
+              setBpPage(1);
+            }}
           >
             <SelectTrigger className="w-[180px]">
               <SelectValue />
@@ -231,19 +255,18 @@ export default function BranchProductsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredByBranchAndStatus.length === 0 ? (
+            {branchProducts.length === 0 ? (
               <TableRow>
                 <TableCell
                   colSpan={7}
                   className="text-center text-muted-foreground py-8"
                 >
-                  {filteredByBranch.length === 0
-                    ? "Нет привязок. Нажмите «Привязать товар к филиалу»."
-                    : "Нет привязок по выбранному фильтру."}
+                  Нет привязок по выбранному фильтру. Нажмите «Привязать товар к
+                  филиалу» или измените фильтры.
                 </TableCell>
               </TableRow>
             ) : (
-              filteredByBranchAndStatus.map((bp) => {
+              branchProducts.map((bp) => {
                 const product = products.find((p) => p.id === bp.productId);
                 return (
                   <TableRow key={bp.id}>
@@ -293,6 +316,37 @@ export default function BranchProductsPage() {
         </Table>
       </div>
 
+      {bpTotal > 25 && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">
+            Всего: {bpTotal}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={bpPage <= 1}
+              onClick={() => setBpPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Назад
+            </Button>
+            <span className="flex items-center px-2 text-muted-foreground">
+              {bpPage} / {Math.ceil(bpTotal / 25) || 1}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={bpPage >= Math.ceil(bpTotal / 25)}
+              onClick={() => setBpPage((p) => p + 1)}
+            >
+              Вперёд
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       <BranchProductFormDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
@@ -300,7 +354,7 @@ export default function BranchProductsPage() {
         branches={branches}
         products={products}
         categories={categories}
-        branchProducts={branchProducts}
+        branchProducts={allBranchProducts}
         onSaved={handleSaved}
       />
 

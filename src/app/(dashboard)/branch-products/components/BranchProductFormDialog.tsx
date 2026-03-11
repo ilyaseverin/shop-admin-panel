@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useDebounce } from "@/lib/utils";
-import { getProducts, createBranchProduct, updateBranchProduct } from "@/lib/api";
+import {
+  getProducts,
+  createBranchProduct,
+  updateBranchProduct,
+} from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -58,7 +62,9 @@ export function BranchProductFormDialog({
 
   const [productSearch, setProductSearch] = useState("");
   const [productListOpen, setProductListOpen] = useState(false);
-  const [productSearchResults, setProductSearchResults] = useState<Product[]>([]);
+  const [productSearchResults, setProductSearchResults] = useState<Product[]>(
+    [],
+  );
   const [productSearchPage, setProductSearchPage] = useState(1);
   const [productSearchTotal, setProductSearchTotal] = useState(0);
   const [productSearchLoading, setProductSearchLoading] = useState(false);
@@ -116,8 +122,11 @@ export function BranchProductFormDialog({
         setProductSearchResults(items as Product[]);
         setProductSearchTotal(total);
       })
-      .catch(() => {
-        if (!cancelled) setProductSearchResults([]);
+      .catch((err) => {
+        if (!cancelled) {
+          setProductSearchResults([]);
+          console.error("[ProductSearch] error:", err);
+        }
       })
       .finally(() => {
         if (!cancelled) setProductSearchLoading(false);
@@ -187,7 +196,7 @@ export function BranchProductFormDialog({
     const branchId = Number(formBranchId);
     const productId = Number(formProductId);
     const exists = branchProducts.some(
-      (bp) => bp.branchId === branchId && bp.productId === productId
+      (bp) => bp.branchId === branchId && bp.productId === productId,
     );
     if (exists) {
       toast.error("Этот товар уже привязан к выбранному филиалу");
@@ -209,7 +218,7 @@ export function BranchProductFormDialog({
       const status = (e as { status?: number })?.status;
       if (status === 409) {
         toast.error(
-          "Такая привязка уже есть. Возможно, удаление на сервере не сработало — обновите страницу (F5) и попробуйте снова."
+          "Такая привязка уже есть. Возможно, удаление на сервере не сработало — обновите страницу (F5) и попробуйте снова.",
         );
         onSaved();
       } else {
@@ -309,7 +318,8 @@ export function BranchProductFormDialog({
                         </div>
                       ) : productSearchResults.length === 0 ? (
                         <div className="px-3 py-4 text-sm text-muted-foreground text-center">
-                          Нет подходящих товаров
+                          Нет подходящих товаров (если ошибка повторяется —
+                          проверьте доступность сервера)
                         </div>
                       ) : (
                         <>
@@ -324,7 +334,7 @@ export function BranchProductFormDialog({
                                   <span>{p.name}</span>
                                   <span className="text-muted-foreground tabular-nums">
                                     {Number(p.price ?? 0).toLocaleString(
-                                      "ru-RU"
+                                      "ru-RU",
                                     )}{" "}
                                     ₽
                                   </span>
@@ -346,7 +356,7 @@ export function BranchProductFormDialog({
                                   disabled={productSearchPage <= 1}
                                   onClick={() =>
                                     setProductSearchPage((p) =>
-                                      Math.max(1, p - 1)
+                                      Math.max(1, p - 1),
                                     )
                                   }
                                 >
@@ -362,15 +372,11 @@ export function BranchProductFormDialog({
                                   size="sm"
                                   className="h-7 px-2"
                                   disabled={
-                                    productSearchPage >=
-                                    productSearchTotalPages
+                                    productSearchPage >= productSearchTotalPages
                                   }
                                   onClick={() =>
                                     setProductSearchPage((p) =>
-                                      Math.min(
-                                        productSearchTotalPages,
-                                        p + 1
-                                      )
+                                      Math.min(productSearchTotalPages, p + 1),
                                     )
                                   }
                                 >
@@ -390,7 +396,7 @@ export function BranchProductFormDialog({
                     <span className="text-foreground">
                       {getCategoryName(
                         products.find((p) => p.id === Number(formProductId))
-                          ?.categoryId ?? 0
+                          ?.categoryId ?? 0,
                       ) || "—"}
                     </span>
                   </p>

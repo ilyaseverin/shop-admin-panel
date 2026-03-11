@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import {
-  getProductsAll,
+  getProducts,
   getCategories,
   deleteProduct,
   getImageUrl,
@@ -21,15 +21,26 @@ import { Badge } from "@/components/ui/badge";
 import { DeleteDialog } from "@/components/delete-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Search } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import type { Product, Category } from "./types";
 import { ProductFormDialog } from "./components/ProductFormDialog";
+
+const PAGE_SIZE = 25;
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -41,17 +52,22 @@ export default function ProductsPage() {
     if (!silent) setLoading(true);
     try {
       const [prodData, catData] = await Promise.all([
-        getProductsAll(),
-        getCategories({ page: 1, limit: 100 }),
+        getProducts({
+          page,
+          limit: PAGE_SIZE,
+          name: search.trim() || undefined,
+        }),
+        getCategories({ page: 1, limit: 25 }),
       ]);
-      setProducts((Array.isArray(prodData) ? prodData : []) as Product[]);
+      setProducts((prodData?.items ?? []) as Product[]);
+      setTotal(prodData?.meta?.total ?? 0);
       setCategories(catData?.items || []);
     } catch {
       toast.error("Ошибка загрузки данных");
     } finally {
       if (!silent) setLoading(false);
     }
-  }, []);
+  }, [page, search]);
 
   useEffect(() => {
     loadData();
@@ -105,11 +121,7 @@ export default function ProductsPage() {
     return categories.find((c) => c.id === id)?.name || `#${id}`;
   };
 
-  const filteredProducts = search
-    ? products.filter((p) =>
-        p.name.toLowerCase().includes(search.toLowerCase()),
-      )
-    : products;
+  const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
 
   return (
     <div className="space-y-6">
@@ -135,7 +147,10 @@ export default function ProductsPage() {
           <Input
             placeholder="Поиск по имени..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
             className="pl-9 bg-muted/50"
           />
         </div>
@@ -165,7 +180,7 @@ export default function ProductsPage() {
                   ))}
                 </TableRow>
               ))
-            ) : filteredProducts.length === 0 ? (
+            ) : products.length === 0 ? (
               <TableRow>
                 <TableCell
                   colSpan={7}
@@ -175,7 +190,7 @@ export default function ProductsPage() {
                 </TableCell>
               </TableRow>
             ) : (
-              filteredProducts.map((product) => (
+              products.map((product) => (
                 <TableRow key={product.id} className="group">
                   <TableCell className="font-mono text-xs text-muted-foreground">
                     {product.id}
@@ -257,6 +272,35 @@ export default function ProductsPage() {
           </TableBody>
         </Table>
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Всего: {total}</span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Назад
+            </Button>
+            <span className="flex items-center px-2 text-muted-foreground">
+              {page} / {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Вперёд
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       <ProductFormDialog
         open={dialogOpen}

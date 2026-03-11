@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getCategories, getProductsAll, getBranches } from "@/lib/api";
+import { getCategories, getProducts, getBranches } from "@/lib/api";
 import { FolderTree, Package, Building2, TrendingUp } from "lucide-react";
 
 interface Stats {
@@ -21,13 +21,13 @@ export default function DashboardPage() {
       try {
         const [catData, prodData, branchData] = await Promise.all([
           getCategories({ page: 1, limit: 1 }),
-          getProductsAll(),
-          getBranches(),
+          getProducts({ page: 1, limit: 1 }),
+          getBranches({ page: 1, limit: 1 }),
         ]);
         setStats({
-          categories: catData?.meta?.total ?? catData?.items?.length ?? 0,
-          products: Array.isArray(prodData) ? prodData.length : 0,
-          branches: Array.isArray(branchData) ? branchData.length : 0,
+          categories: (catData as { meta?: { total?: number } })?.meta?.total ?? 0,
+          products: prodData?.meta?.total ?? 0,
+          branches: branchData?.meta?.total ?? 0,
         });
       } catch {
         setStats({ categories: 0, products: 0, branches: 0 });

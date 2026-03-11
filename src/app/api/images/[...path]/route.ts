@@ -81,3 +81,60 @@ export async function POST(
     return proxyError(error);
   }
 }
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> },
+) {
+  const { path } = await params;
+  const base = getImageApi();
+  const targetPath = path.join("/");
+  const url = `${base}/${targetPath}${request.nextUrl.search}`;
+
+  const body = await request.text();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const auth = request.headers.get("authorization");
+  if (auth) headers["Authorization"] = auth;
+
+  try {
+    const res = await fetch(url, { method: "PATCH", headers, body });
+    const data = await res.text();
+    return new NextResponse(data, {
+      status: res.status,
+      headers: {
+        "Content-Type": res.headers.get("Content-Type") || "application/json",
+      },
+    });
+  } catch (error) {
+    return proxyError(error);
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> },
+) {
+  const { path } = await params;
+  const base = getImageApi();
+  const targetPath = path.join("/");
+  const url = `${base}/${targetPath}${request.nextUrl.search}`;
+
+  const headers: Record<string, string> = {};
+  const auth = request.headers.get("authorization");
+  if (auth) headers["Authorization"] = auth;
+
+  try {
+    const res = await fetch(url, { method: "DELETE", headers });
+    const data = await res.text();
+    return new NextResponse(data, {
+      status: res.status,
+      headers: {
+        "Content-Type": res.headers.get("Content-Type") || "application/json",
+      },
+    });
+  } catch (error) {
+    return proxyError(error);
+  }
+}

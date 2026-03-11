@@ -45,13 +45,13 @@ export default function CategoriesPage() {
   const loadCategories = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [listData, allData] = await Promise.all([
-        getCategories({ page, limit, name: search || undefined }),
-        getCategories({ page: 1, limit: 1000 }), // Load all for dropdown
-      ]);
+      const listData = await getCategories({
+        page,
+        limit,
+        name: search || undefined,
+      });
       setCategories(listData.items || []);
-      setTotal(listData.meta?.total || 0);
-      setAllCategories(allData.items || []);
+      setTotal((listData as { meta?: { total?: number } })?.meta?.total || 0);
     } catch {
       toast.error("Ошибка загрузки категорий");
     } finally {
@@ -62,6 +62,14 @@ export default function CategoriesPage() {
   useEffect(() => {
     loadCategories();
   }, [loadCategories]);
+
+  /** Список категорий для выпадающего списка (родитель) — грузим только при открытии диалога. */
+  useEffect(() => {
+    if (!dialogOpen) return;
+    getCategories({ page: 1, limit: 25 })
+      .then((data) => setAllCategories((data as { items?: Category[] }).items ?? []))
+      .catch(() => setAllCategories([]));
+  }, [dialogOpen]);
 
   const openCreate = () => {
     setEditingCategory(null);
