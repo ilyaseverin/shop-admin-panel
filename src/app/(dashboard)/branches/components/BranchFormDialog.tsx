@@ -24,6 +24,15 @@ interface BranchFormDialogProps {
   onSaved: () => void;
 }
 
+type FieldErrors = Partial<Record<keyof BranchForm, string>>;
+
+function validate(form: BranchForm): FieldErrors {
+  const errors: FieldErrors = {};
+  if (!form.name.trim()) errors.name = "Введите название филиала";
+  if (!form.address.trim()) errors.address = "Введите адрес филиала";
+  return errors;
+}
+
 export function BranchFormDialog({
   open,
   onOpenChange,
@@ -33,9 +42,13 @@ export function BranchFormDialog({
   const editingId = branch?.id ?? null;
   const [form, setForm] = useState<BranchForm>(emptyBranchForm);
   const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState<FieldErrors>({});
+  const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
     if (!open) return;
+    setErrors({});
+    setSubmitted(false);
     if (branch) {
       setForm({
         name: branch.name || "",
@@ -51,11 +64,23 @@ export function BranchFormDialog({
     }
   }, [open, branch]);
 
-  const handleSave = async () => {
-    if (!form.name || !form.address) {
-      toast.error("Заполните обязательные поля (Название и Адрес)");
-      return;
+  const updateField = <K extends keyof BranchForm>(key: K, value: BranchForm[K]) => {
+    setForm((f) => ({ ...f, [key]: value }));
+    if (submitted) {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
     }
+  };
+
+  const handleSave = async () => {
+    setSubmitted(true);
+    const fieldErrors = validate(form);
+    setErrors(fieldErrors);
+    if (Object.keys(fieldErrors).length > 0) return;
+
     setSaving(true);
     try {
       const payload = {
@@ -93,34 +118,38 @@ export function BranchFormDialog({
         </DialogHeader>
         <div className="space-y-4 mt-4">
           <div className="space-y-2">
-            <Label>Название *</Label>
+            <Label>
+              Название <span className="text-destructive">*</span>
+            </Label>
             <Input
               value={form.name}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, name: e.target.value }))
-              }
+              onChange={(e) => updateField("name", e.target.value)}
               placeholder="Центральный офис"
-              className="bg-muted/50"
+              className={`bg-muted/50 ${errors.name ? "border-destructive" : ""}`}
             />
+            {errors.name && (
+              <p className="text-sm text-destructive">{errors.name}</p>
+            )}
           </div>
           <div className="space-y-2">
-            <Label>Адрес *</Label>
+            <Label>
+              Адрес <span className="text-destructive">*</span>
+            </Label>
             <Input
               value={form.address}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, address: e.target.value }))
-              }
+              onChange={(e) => updateField("address", e.target.value)}
               placeholder="ул. Примерная, д. 1"
-              className="bg-muted/50"
+              className={`bg-muted/50 ${errors.address ? "border-destructive" : ""}`}
             />
+            {errors.address && (
+              <p className="text-sm text-destructive">{errors.address}</p>
+            )}
           </div>
           <div className="space-y-2">
             <Label>Описание</Label>
             <Textarea
               value={form.description}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, description: e.target.value }))
-              }
+              onChange={(e) => updateField("description", e.target.value)}
               placeholder="Описание филиала..."
               className="bg-muted/50 resize-none"
               rows={2}
@@ -131,9 +160,7 @@ export function BranchFormDialog({
               <Label>Город</Label>
               <Input
                 value={form.city}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, city: e.target.value }))
-                }
+                onChange={(e) => updateField("city", e.target.value)}
                 placeholder="Москва"
                 className="bg-muted/50"
               />
@@ -142,9 +169,7 @@ export function BranchFormDialog({
               <Label>Регион</Label>
               <Input
                 value={form.region}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, region: e.target.value }))
-                }
+                onChange={(e) => updateField("region", e.target.value)}
                 placeholder="Московская область"
                 className="bg-muted/50"
               />
@@ -154,9 +179,7 @@ export function BranchFormDialog({
             <Label>Телефон</Label>
             <Input
               value={form.phone}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, phone: e.target.value }))
-              }
+              onChange={(e) => updateField("phone", e.target.value)}
               placeholder="+7 (999) 123-45-67"
               className="bg-muted/50"
             />
@@ -164,9 +187,7 @@ export function BranchFormDialog({
           <div className="flex items-center gap-3">
             <Switch
               checked={form.isActive}
-              onCheckedChange={(checked) =>
-                setForm((f) => ({ ...f, isActive: checked }))
-              }
+              onCheckedChange={(checked) => updateField("isActive", checked)}
             />
             <Label>Филиал активен</Label>
           </div>

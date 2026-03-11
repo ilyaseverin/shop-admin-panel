@@ -31,6 +31,16 @@ import { emptyCategoryForm } from "../types";
 
 const SLUG_CHECK_DELAY_MS = 400;
 
+type FieldErrors = Partial<Record<keyof CategoryForm, string>>;
+
+function validate(form: CategoryForm, slugExists: boolean): FieldErrors {
+  const errors: FieldErrors = {};
+  if (!form.name.trim()) errors.name = "Введите название категории";
+  if (!form.slug.trim()) errors.slug = "Введите slug";
+  else if (slugExists) errors.slug = "Слаг уже используется";
+  return errors;
+}
+
 interface CategoryFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -51,9 +61,13 @@ export function CategoryFormDialog({
   const [saving, setSaving] = useState(false);
   const [slugExists, setSlugExists] = useState(false);
   const [slugChecking, setSlugChecking] = useState(false);
+  const [errors, setErrors] = useState<FieldErrors>({});
+  const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
     if (!open) return;
+    setErrors({});
+    setSubmitted(false);
     if (category) {
       setForm({
         name: category.name || "",
@@ -74,6 +88,7 @@ export function CategoryFormDialog({
       setSlugExists(false);
       return;
     }
+    setSlugExists(false);
     const t = setTimeout(async () => {
       setSlugChecking(true);
       try {
@@ -91,15 +106,23 @@ export function CategoryFormDialog({
     return () => clearTimeout(t);
   }, [open, form.slug, editingId]);
 
+  const updateField = <K extends keyof CategoryForm>(key: K, value: CategoryForm[K]) => {
+    setForm((f) => ({ ...f, [key]: value }));
+    if (submitted) {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
+  };
+
   const handleSave = async () => {
-    if (!form.name || !form.slug) {
-      toast.error("Заполните обязательные поля (Имя и Slug)");
-      return;
-    }
-    if (slugExists) {
-      toast.error("Этот слаг уже используется. Выберите другой.");
-      return;
-    }
+    setSubmitted(true);
+    const fieldErrors = validate(form, slugExists);
+    setErrors(fieldErrors);
+    if (Object.keys(fieldErrors).length > 0) return;
+
     setSaving(true);
     try {
       const payload = {
@@ -130,6 +153,8 @@ export function CategoryFormDialog({
     }
   };
 
+  const slugError = errors.slug || (slugExists ? "Слаг уже используется" : "");
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-4xl bg-card border-border max-h-[90vh] overflow-y-auto">
@@ -141,31 +166,35 @@ export function CategoryFormDialog({
         <div className="space-y-4 mt-4">
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Имя *</Label>
+              <Label>
+                Имя <span className="text-destructive">*</span>
+              </Label>
               <Input
                 value={form.name}
                 onChange={(e) => {
                   const name = e.target.value;
-                  setForm((f) => ({
-                    ...f,
-                    name,
-                    slug: editingId ? f.slug : generateSlug(name),
-                  }));
+                  updateField("name", name);
+                  if (!editingId) {
+                    updateField("slug", generateSlug(name));
+                  }
                 }}
                 placeholder="Электроника и гаджеты"
-                className="bg-muted/50"
+                className={`bg-muted/50 ${errors.name ? "border-destructive" : ""}`}
               />
+              {errors.name && (
+                <p className="text-sm text-destructive">{errors.name}</p>
+              )}
             </div>
             <div className="space-y-2">
-              <Label>Slug *</Label>
+              <Label>
+                Slug <span className="text-destructive">*</span>
+              </Label>
               <div className="flex gap-2 items-center">
                 <Input
                   value={form.slug}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, slug: e.target.value }))
-                  }
+                  onChange={(e) => updateField("slug", e.target.value)}
                   placeholder="electronics"
-                  className="bg-muted/50 font-mono text-sm"
+                  className={`bg-muted/50 font-mono text-sm ${slugError ? "border-destructive" : ""}`}
                 />
                 <Button
                   type="button"
@@ -176,7 +205,7 @@ export function CategoryFormDialog({
                     const slug = await generateUniqueSlug(form.name, (s) =>
                       checkCategorySlugExists(s, editingId ?? undefined)
                     );
-                    setForm((f) => ({ ...f, slug }));
+                    updateField("slug", slug);
                   }}
                 >
                   <RefreshCw className="h-4 w-4" />
@@ -186,8 +215,8 @@ export function CategoryFormDialog({
                 {slugChecking && (
                   <p className="text-muted-foreground">Проверка слага...</p>
                 )}
-                {!slugChecking && slugExists && (
-                  <p className="text-destructive">Слаг уже используется</p>
+                {!slugChecking && slugError && (
+                  <p className="text-destructive">{slugError}</p>
                 )}
               </div>
             </div>
@@ -196,9 +225,7 @@ export function CategoryFormDialog({
             <Label>Полное имя</Label>
             <Input
               value={form.fullName}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, fullName: e.target.value }))
-              }
+              onChange={(e) => updateField("fullName", e.target.value)}
               placeholder="Электроника и гаджеты"
               className="bg-muted/50"
             />
@@ -207,9 +234,7 @@ export function CategoryFormDialog({
             <Label>Описание</Label>
             <Textarea
               value={form.description}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, description: e.target.value }))
-              }
+              onChange={(e) => updateField("description", e.target.value)}
               placeholder="Описание категории..."
               className="bg-muted/50 resize-none"
               rows={3}
@@ -221,10 +246,7 @@ export function CategoryFormDialog({
               <Select
                 value={form.parentId || "0"}
                 onValueChange={(val) =>
-                  setForm((f) => ({
-                    ...f,
-                    parentId: val === "0" ? "" : val,
-                  }))
+                  updateField("parentId", val === "0" ? "" : val)
                 }
               >
                 <SelectTrigger className="bg-muted/50 w-full overflow-hidden">
@@ -254,9 +276,7 @@ export function CategoryFormDialog({
               <Input
                 type="number"
                 value={form.sortOrder}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, sortOrder: e.target.value }))
-                }
+                onChange={(e) => updateField("sortOrder", e.target.value)}
                 placeholder="0"
                 className="bg-muted/50"
               />

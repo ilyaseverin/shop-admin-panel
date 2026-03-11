@@ -33,6 +33,47 @@ import type { BranchProduct, Product, Branch, Category } from "../types";
 
 const PRODUCT_SEARCH_LIMIT = 10;
 
+type FieldErrors = Partial<
+  Record<"branchId" | "productId" | "price" | "duplicate", string>
+>;
+
+function validateCreate(
+  formBranchId: string,
+  formProductId: string,
+  formPrice: string,
+  allBranchProducts: BranchProduct[],
+): FieldErrors {
+  const errors: FieldErrors = {};
+  if (!formBranchId) errors.branchId = "Выберите филиал";
+  if (!formProductId) errors.productId = "Выберите товар";
+  if (!formPrice.trim()) {
+    errors.price = "Укажите цену";
+  } else {
+    const price = Number(formPrice);
+    if (Number.isNaN(price) || price < 0) errors.price = "Укажите корректную цену";
+  }
+  if (formBranchId && formProductId) {
+    const exists = allBranchProducts.some(
+      (bp) =>
+        bp.branchId === Number(formBranchId) &&
+        bp.productId === Number(formProductId),
+    );
+    if (exists) errors.duplicate = "Этот товар уже привязан к выбранному филиалу";
+  }
+  return errors;
+}
+
+function validateEdit(formPrice: string): FieldErrors {
+  const errors: FieldErrors = {};
+  if (!formPrice.trim()) {
+    errors.price = "Укажите цену";
+  } else {
+    const price = Number(formPrice);
+    if (Number.isNaN(price) || price < 0) errors.price = "Укажите корректную цену";
+  }
+  return errors;
+}
+
 interface BranchProductFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -73,6 +114,9 @@ export function BranchProductFormDialog({
   const [allBranchProducts, setAllBranchProducts] = useState<BranchProduct[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [submitted, setSubmitted] = useState(false);
+
   const debouncedProductSearch = useDebounce(productSearch, 300);
   const productSearchTotalPages =
     Math.ceil(productSearchTotal / PRODUCT_SEARCH_LIMIT) || 1;
@@ -84,8 +128,21 @@ export function BranchProductFormDialog({
   const getCategoryName = (id: number) =>
     categories.find((c) => c.id === id)?.name ?? "";
 
+  const clearFieldError = (key: keyof FieldErrors) => {
+    if (submitted) {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        delete next.duplicate;
+        return next;
+      });
+    }
+  };
+
   useEffect(() => {
     if (!open) return;
+    setFieldErrors({});
+    setSubmitted(false);
     if (editingItem) {
       setFormBranchId(String(editingItem.branchId));
       setFormProductId(String(editingItem.productId));
@@ -148,6 +205,7 @@ export function BranchProductFormDialog({
     setProductListOpen(false);
     setFormPrice(String(p.price ?? 0));
     setSelectedProduct(p);
+    clearFieldError("productId");
   };
 
   const clearProduct = () => {
@@ -163,16 +221,19 @@ export function BranchProductFormDialog({
     }
     const p = selectedProduct ?? products.find((pr) => pr.id === Number(formProductId));
     setFormPrice(String(p?.price ?? 0));
+    clearFieldError("price");
     toast.success("Цена подставлена из товара");
   };
 
   const handleSave = async () => {
+    setSubmitted(true);
+
     if (editingId) {
+      const errs = validateEdit(formPrice);
+      setFieldErrors(errs);
+      if (Object.keys(errs).length > 0) return;
+
       const price = Number(formPrice);
-      if (Number.isNaN(price) || price < 0) {
-        toast.error("Укажите корректную цену");
-        return;
-      }
       setSaving(true);
       try {
         await updateBranchProduct(editingId, {
@@ -193,24 +254,13 @@ export function BranchProductFormDialog({
       return;
     }
 
-    if (!formBranchId || !formProductId || !formPrice.trim()) {
-      toast.error("Выберите филиал, товар и укажите цену");
-      return;
-    }
+    const errs = validateCreate(formBranchId, formProductId, formPrice, allBranchProducts);
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+
     const price = Number(formPrice);
-    if (Number.isNaN(price) || price < 0) {
-      toast.error("Укажите корректную цену");
-      return;
-    }
     const branchId = Number(formBranchId);
     const productId = Number(formProductId);
-    const exists = allBranchProducts.some(
-      (bp) => bp.branchId === branchId && bp.productId === productId,
-    );
-    if (exists) {
-      toast.error("Этот товар уже привязан к выбранному филиалу");
-      return;
-    }
     setSaving(true);
     try {
       await createBranchProduct({
@@ -269,9 +319,17 @@ export function BranchProductFormDialog({
           {!editingId && (
             <>
               <div className="space-y-2">
-                <Label>Филиал</Label>
-                <Select value={formBranchId} onValueChange={setFormBranchId}>
-                  <SelectTrigger className="w-full">
+                <Label>
+                  Филиал <span className="text-destructive">*</span>
+                </Label>
+                <Select
+                  value={formBranchId}
+                  onValueChange={(val) => {
+                    setFormBranchId(val);
+                    clearFieldError("branchId");
+                  }}
+                >
+                  <SelectTrigger className={`w-full ${fieldErrors.branchId ? "border-destructive" : ""}`}>
                     <SelectValue placeholder="Выберите филиал" />
                   </SelectTrigger>
                   <SelectContent
@@ -286,9 +344,14 @@ export function BranchProductFormDialog({
                     ))}
                   </SelectContent>
                 </Select>
+                {fieldErrors.branchId && (
+                  <p className="text-sm text-destructive">{fieldErrors.branchId}</p>
+                )}
               </div>
               <div className="space-y-2">
-                <Label>Товар</Label>
+                <Label>
+                  Товар <span className="text-destructive">*</span>
+                </Label>
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                   <Input
@@ -302,12 +365,13 @@ export function BranchProductFormDialog({
                         setFormProductId("");
                         setSelectedProduct(null);
                       }
+                      clearFieldError("productId");
                     }}
                     onFocus={() => setProductListOpen(true)}
                     onBlur={() =>
                       setTimeout(() => setProductListOpen(false), 150)
                     }
-                    className="pl-9 pr-8"
+                    className={`pl-9 pr-8 ${fieldErrors.productId ? "border-destructive" : ""}`}
                   />
                   {formProductId && (
                     <button
@@ -406,6 +470,12 @@ export function BranchProductFormDialog({
                     </div>
                   )}
                 </div>
+                {fieldErrors.productId && (
+                  <p className="text-sm text-destructive">{fieldErrors.productId}</p>
+                )}
+                {fieldErrors.duplicate && (
+                  <p className="text-sm text-destructive">{fieldErrors.duplicate}</p>
+                )}
                 {formProductId && selectedCategoryId && (
                   <p className="text-sm text-muted-foreground">
                     Категория:{" "}
@@ -419,15 +489,24 @@ export function BranchProductFormDialog({
           )}
           <div className="flex items-end gap-2">
             <div className="space-y-2 flex-1">
-              <Label>Цена в филиале</Label>
+              <Label>
+                Цена в филиале <span className="text-destructive">*</span>
+              </Label>
               <Input
                 type="number"
                 min={0}
                 step={0.01}
                 value={formPrice}
-                onChange={(e) => setFormPrice(e.target.value)}
+                onChange={(e) => {
+                  setFormPrice(e.target.value);
+                  clearFieldError("price");
+                }}
                 placeholder="0"
+                className={fieldErrors.price ? "border-destructive" : ""}
               />
+              {fieldErrors.price && (
+                <p className="text-sm text-destructive">{fieldErrors.price}</p>
+              )}
             </div>
             {!editingId && (
               <Button

@@ -59,6 +59,18 @@ interface ProductFormDialogProps {
   onSaved: () => void;
 }
 
+type FieldErrors = Partial<Record<keyof ProductForm, string>>;
+
+function validateProductForm(form: ProductForm, slugExists: boolean): FieldErrors {
+  const errors: FieldErrors = {};
+  if (!form.name.trim()) errors.name = "Введите название товара";
+  if (!form.slug.trim()) errors.slug = "Введите slug";
+  else if (slugExists) errors.slug = "Слаг уже используется";
+  if (!form.price || Number(form.price) < 0) errors.price = "Укажите корректную цену";
+  if (!form.categoryId) errors.categoryId = "Выберите категорию";
+  return errors;
+}
+
 export function ProductFormDialog({
   open,
   onOpenChange,
@@ -72,6 +84,8 @@ export function ProductFormDialog({
   const [saving, setSaving] = useState(false);
   const [slugExists, setSlugExists] = useState(false);
   const [slugChecking, setSlugChecking] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [submitted, setSubmitted] = useState(false);
   const [uploadedImages, setUploadedImages] = useState<ProductImage[]>([]);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -94,9 +108,20 @@ export function ProductFormDialog({
 
   const debouncedCategorySearch = useDebounce(categorySearch, 300);
 
-  // Init form when dialog opens or product changes
+  const clearFieldError = (key: string) => {
+    if (submitted) {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[key as keyof FieldErrors];
+        return next;
+      });
+    }
+  };
+
   useEffect(() => {
     if (!open) return;
+    setFieldErrors({});
+    setSubmitted(false);
     originalImageTypesRef.current = new Map();
     if (product) {
       setForm({
@@ -149,12 +174,12 @@ export function ProductFormDialog({
     setSlugExists(false);
   }, [open, product, categories]);
 
-  // Slug existence check
   useEffect(() => {
     if (!open || !form.slug?.trim()) {
       setSlugExists(false);
       return;
     }
+    setSlugExists(false);
     const t = setTimeout(async () => {
       setSlugChecking(true);
       try {
@@ -314,14 +339,11 @@ export function ProductFormDialog({
   };
 
   const handleSave = async () => {
-    if (!form.name || !form.slug || !form.price || !form.categoryId) {
-      toast.error("Заполните обязательные поля (Имя, Slug, Цена, Категория)");
-      return;
-    }
-    if (slugExists) {
-      toast.error("Этот слаг уже используется. Выберите другой.");
-      return;
-    }
+    setSubmitted(true);
+    const errs = validateProductForm(form, slugExists);
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+
     setSaving(true);
     try {
       const payload: Parameters<typeof createProduct>[0] = {
@@ -447,7 +469,9 @@ export function ProductFormDialog({
         <div className="space-y-4 mt-4">
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Название *</Label>
+              <Label>
+                Название <span className="text-destructive">*</span>
+              </Label>
               <Input
                 value={form.name}
                 onChange={(e) => {
@@ -457,21 +481,29 @@ export function ProductFormDialog({
                     name,
                     slug: editingId ? f.slug : generateSlug(name),
                   }));
+                  clearFieldError("name");
+                  if (!editingId) clearFieldError("slug");
                 }}
                 placeholder="Смартфон XYZ Pro 256GB"
-                className="bg-muted/50"
+                className={`bg-muted/50 ${fieldErrors.name ? "border-destructive" : ""}`}
               />
+              {fieldErrors.name && (
+                <p className="text-sm text-destructive">{fieldErrors.name}</p>
+              )}
             </div>
             <div className="space-y-2">
-              <Label>Slug *</Label>
+              <Label>
+                Slug <span className="text-destructive">*</span>
+              </Label>
               <div className="flex gap-2 items-center">
                 <Input
                   value={form.slug}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, slug: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    setForm((f) => ({ ...f, slug: e.target.value }));
+                    clearFieldError("slug");
+                  }}
                   placeholder="smartphone-xyz"
-                  className="bg-muted/50 font-mono text-sm"
+                  className={`bg-muted/50 font-mono text-sm ${fieldErrors.slug || slugExists ? "border-destructive" : ""}`}
                 />
                 <Button
                   type="button"
@@ -483,6 +515,7 @@ export function ProductFormDialog({
                       checkProductSlugExists(s, editingId ?? undefined)
                     );
                     setForm((f) => ({ ...f, slug }));
+                    clearFieldError("slug");
                   }}
                 >
                   <RefreshCw className="h-4 w-4" />
@@ -492,7 +525,10 @@ export function ProductFormDialog({
                 {slugChecking && (
                   <p className="text-muted-foreground">Проверка слага...</p>
                 )}
-                {!slugChecking && slugExists && (
+                {!slugChecking && fieldErrors.slug && (
+                  <p className="text-destructive">{fieldErrors.slug}</p>
+                )}
+                {!slugChecking && !fieldErrors.slug && slugExists && (
                   <p className="text-destructive">Слаг уже используется</p>
                 )}
               </div>
@@ -523,19 +559,27 @@ export function ProductFormDialog({
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Цена *</Label>
+              <Label>
+                Цена <span className="text-destructive">*</span>
+              </Label>
               <Input
                 type="number"
                 value={form.price}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, price: e.target.value }))
-                }
+                onChange={(e) => {
+                  setForm((f) => ({ ...f, price: e.target.value }));
+                  clearFieldError("price");
+                }}
                 placeholder="9990"
-                className="bg-muted/50"
+                className={`bg-muted/50 ${fieldErrors.price ? "border-destructive" : ""}`}
               />
+              {fieldErrors.price && (
+                <p className="text-sm text-destructive">{fieldErrors.price}</p>
+              )}
             </div>
             <div className="space-y-2">
-              <Label>Категория *</Label>
+              <Label>
+                Категория <span className="text-destructive">*</span>
+              </Label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                 <Input
@@ -556,13 +600,14 @@ export function ProductFormDialog({
                       setForm((f) => ({ ...f, categoryId: "" }));
                       setSelectedCategoryName("");
                     }
+                    clearFieldError("categoryId");
                   }}
                   onFocus={() => setCategoryDropdownOpen(true)}
                   onBlur={() =>
                     setTimeout(() => setCategoryDropdownOpen(false), 200)
                   }
                   placeholder="Поиск по имени или slug..."
-                  className="pl-9 bg-muted/50"
+                  className={`pl-9 bg-muted/50 ${fieldErrors.categoryId ? "border-destructive" : ""}`}
                 />
                 {categoryDropdownOpen && (
                   <div
@@ -595,6 +640,7 @@ export function ProductFormDialog({
                                   setSelectedCategoryName(cat.name || "");
                                   setCategorySearch("");
                                   setCategoryDropdownOpen(false);
+                                  clearFieldError("categoryId");
                                 }}
                               >
                                 {cat.name}
@@ -659,6 +705,9 @@ export function ProductFormDialog({
                   </div>
                 )}
               </div>
+              {fieldErrors.categoryId && (
+                <p className="text-sm text-destructive">{fieldErrors.categoryId}</p>
+              )}
             </div>
           </div>
 
