@@ -41,7 +41,7 @@ import {
 } from "lucide-react";
 import type { Product, ProductImage, Category, ProductForm, LocalVariantGroup, LocalVariantOption } from "../types";
 import { emptyProductForm } from "../types";
-import { VariantManager } from "./VariantManager";
+import { VariantManager, type VariantManagerHandle } from "./VariantManager";
 
 const CATEGORY_SEARCH_LIMIT = 5;
 const SLUG_CHECK_DELAY_MS = 400;
@@ -93,6 +93,7 @@ export function ProductFormDialog({
 
   // Original image types from server (to detect changes on save)
   const originalImageTypesRef = useRef<Map<string, string>>(new Map());
+  const variantManagerRef = useRef<VariantManagerHandle>(null);
 
   const [categorySearch, setCategorySearch] = useState("");
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
@@ -386,6 +387,11 @@ export function ProductFormDialog({
           if (origType && origType !== img.type) {
             await updateImageType(img.url, img.type);
           }
+        }
+
+        // Save variant changes
+        if (variantManagerRef.current) {
+          await variantManagerRef.current.save();
         }
 
         toast.success("Товар обновлён");
@@ -816,7 +822,7 @@ export function ProductFormDialog({
 
             {editingId ? (
               /* Edit mode — full CRUD via API */
-              <VariantManager productId={editingId} />
+              <VariantManager ref={variantManagerRef} productId={editingId} />
             ) : localGroups.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 Нет вариантов. Нажмите «Добавить группу» чтобы добавить (например: Размер, Цвет).
@@ -902,7 +908,8 @@ export function ProductFormDialog({
                                     priceDelta: Number(e.target.value) || 0,
                                   })
                                 }
-                                placeholder="Дельта ₽"
+                                placeholder="± ₽"
+                                title="Надбавка или скидка к базовой цене товара"
                                 className="bg-muted/50 h-7 text-xs w-24"
                               />
                               <Button
