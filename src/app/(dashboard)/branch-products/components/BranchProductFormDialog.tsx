@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useDebounce } from "@/lib/utils";
-import { getProducts, createBranchProduct, updateBranchProduct } from "@/lib/api";
+import {
+  getProducts,
+  getAllBranchProducts,
+  createBranchProduct,
+  updateBranchProduct,
+} from "@/lib/api";
+import { invalidateBranchProducts } from "@/lib/swr";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,6 +33,47 @@ import type { BranchProduct, Product, Branch, Category } from "../types";
 
 const PRODUCT_SEARCH_LIMIT = 10;
 
+type FieldErrors = Partial<
+  Record<"branchId" | "productId" | "price" | "duplicate", string>
+>;
+
+function validateCreate(
+  formBranchId: string,
+  formProductId: string,
+  formPrice: string,
+  allBranchProducts: BranchProduct[],
+): FieldErrors {
+  const errors: FieldErrors = {};
+  if (!formBranchId) errors.branchId = "Выберите филиал";
+  if (!formProductId) errors.productId = "Выберите товар";
+  if (!formPrice.trim()) {
+    errors.price = "Укажите цену";
+  } else {
+    const price = Number(formPrice);
+    if (Number.isNaN(price) || price < 0) errors.price = "Укажите корректную цену";
+  }
+  if (formBranchId && formProductId) {
+    const exists = allBranchProducts.some(
+      (bp) =>
+        bp.branchId === Number(formBranchId) &&
+        bp.productId === Number(formProductId),
+    );
+    if (exists) errors.duplicate = "Этот товар уже привязан к выбранному филиалу";
+  }
+  return errors;
+}
+
+function validateEdit(formPrice: string): FieldErrors {
+  const errors: FieldErrors = {};
+  if (!formPrice.trim()) {
+    errors.price = "Укажите цену";
+  } else {
+    const price = Number(formPrice);
+    if (Number.isNaN(price) || price < 0) errors.price = "Укажите корректную цену";
+  }
+  return errors;
+}
+
 interface BranchProductFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -34,7 +81,6 @@ interface BranchProductFormDialogProps {
   branches: Branch[];
   products: Product[];
   categories: Category[];
-  branchProducts: BranchProduct[];
   onSaved: () => void;
 }
 
@@ -45,7 +91,6 @@ export function BranchProductFormDialog({
   branches,
   products,
   categories,
-  branchProducts,
   onSaved,
 }: BranchProductFormDialogProps) {
   const editingId = editingItem?.id ?? null;
@@ -58,11 +103,19 @@ export function BranchProductFormDialog({
 
   const [productSearch, setProductSearch] = useState("");
   const [productListOpen, setProductListOpen] = useState(false);
-  const [productSearchResults, setProductSearchResults] = useState<Product[]>([]);
+  const [productSearchResults, setProductSearchResults] = useState<Product[]>(
+    [],
+  );
   const [productSearchPage, setProductSearchPage] = useState(1);
   const [productSearchTotal, setProductSearchTotal] = useState(0);
   const [productSearchLoading, setProductSearchLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const [allBranchProducts, setAllBranchProducts] = useState<BranchProduct[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [submitted, setSubmitted] = useState(false);
 
   const debouncedProductSearch = useDebounce(productSearch, 300);
   const productSearchTotalPages =
@@ -74,17 +127,29 @@ export function BranchProductFormDialog({
     products.find((p) => p.id === id)?.name ?? `#${id}`;
   const getCategoryName = (id: number) =>
     categories.find((c) => c.id === id)?.name ?? "";
-  const getProductPrice = (id: number) =>
-    products.find((p) => p.id === id)?.price ?? 0;
+
+  const clearFieldError = (key: keyof FieldErrors) => {
+    if (submitted) {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        delete next.duplicate;
+        return next;
+      });
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
+    setFieldErrors({});
+    setSubmitted(false);
     if (editingItem) {
       setFormBranchId(String(editingItem.branchId));
       setFormProductId(String(editingItem.productId));
       setFormPrice(String(editingItem.price));
       setFormStock(String(editingItem.stock));
       setFormIsActive(editingItem.isActive);
+      setSelectedProduct(null);
     } else {
       setFormBranchId("");
       setFormProductId("");
@@ -95,6 +160,10 @@ export function BranchProductFormDialog({
       setProductListOpen(false);
       setProductSearchPage(1);
       setProductSearchResults([]);
+      setSelectedProduct(null);
+      getAllBranchProducts()
+        .then(setAllBranchProducts)
+        .catch(() => setAllBranchProducts([]));
     }
   }, [open, editingItem]);
 
@@ -116,8 +185,11 @@ export function BranchProductFormDialog({
         setProductSearchResults(items as Product[]);
         setProductSearchTotal(total);
       })
-      .catch(() => {
-        if (!cancelled) setProductSearchResults([]);
+      .catch((err) => {
+        if (!cancelled) {
+          setProductSearchResults([]);
+          console.error("[ProductSearch] error:", err);
+        }
       })
       .finally(() => {
         if (!cancelled) setProductSearchLoading(false);
@@ -132,11 +204,14 @@ export function BranchProductFormDialog({
     setProductSearch(p.name || "");
     setProductListOpen(false);
     setFormPrice(String(p.price ?? 0));
+    setSelectedProduct(p);
+    clearFieldError("productId");
   };
 
   const clearProduct = () => {
     setFormProductId("");
     setProductSearch("");
+    setSelectedProduct(null);
   };
 
   const pullPriceFromProduct = () => {
@@ -144,18 +219,21 @@ export function BranchProductFormDialog({
       toast.error("Сначала выберите товар");
       return;
     }
-    const price = getProductPrice(Number(formProductId));
-    setFormPrice(String(price));
+    const p = selectedProduct ?? products.find((pr) => pr.id === Number(formProductId));
+    setFormPrice(String(p?.price ?? 0));
+    clearFieldError("price");
     toast.success("Цена подставлена из товара");
   };
 
   const handleSave = async () => {
+    setSubmitted(true);
+
     if (editingId) {
+      const errs = validateEdit(formPrice);
+      setFieldErrors(errs);
+      if (Object.keys(errs).length > 0) return;
+
       const price = Number(formPrice);
-      if (Number.isNaN(price) || price < 0) {
-        toast.error("Укажите корректную цену");
-        return;
-      }
       setSaving(true);
       try {
         await updateBranchProduct(editingId, {
@@ -165,6 +243,7 @@ export function BranchProductFormDialog({
         });
         toast.success("Товар в филиале обновлён");
         onOpenChange(false);
+        invalidateBranchProducts();
         onSaved();
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Ошибка сохранения";
@@ -175,24 +254,13 @@ export function BranchProductFormDialog({
       return;
     }
 
-    if (!formBranchId || !formProductId || !formPrice.trim()) {
-      toast.error("Выберите филиал, товар и укажите цену");
-      return;
-    }
+    const errs = validateCreate(formBranchId, formProductId, formPrice, allBranchProducts);
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+
     const price = Number(formPrice);
-    if (Number.isNaN(price) || price < 0) {
-      toast.error("Укажите корректную цену");
-      return;
-    }
     const branchId = Number(formBranchId);
     const productId = Number(formProductId);
-    const exists = branchProducts.some(
-      (bp) => bp.branchId === branchId && bp.productId === productId
-    );
-    if (exists) {
-      toast.error("Этот товар уже привязан к выбранному филиалу");
-      return;
-    }
     setSaving(true);
     try {
       await createBranchProduct({
@@ -204,12 +272,13 @@ export function BranchProductFormDialog({
       });
       toast.success("Товар привязан к филиалу");
       onOpenChange(false);
+      invalidateBranchProducts();
       onSaved();
     } catch (e: unknown) {
       const status = (e as { status?: number })?.status;
       if (status === 409) {
         toast.error(
-          "Такая привязка уже есть. Возможно, удаление на сервере не сработало — обновите страницу (F5) и попробуйте снова."
+          "Такая привязка уже есть. Возможно, удаление на сервере не сработало — обновите страницу (F5) и попробуйте снова.",
         );
         onSaved();
       } else {
@@ -219,6 +288,9 @@ export function BranchProductFormDialog({
       setSaving(false);
     }
   };
+
+  const selectedCategoryId = selectedProduct?.categoryId
+    ?? products.find((p) => p.id === Number(formProductId))?.categoryId;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -247,9 +319,17 @@ export function BranchProductFormDialog({
           {!editingId && (
             <>
               <div className="space-y-2">
-                <Label>Филиал</Label>
-                <Select value={formBranchId} onValueChange={setFormBranchId}>
-                  <SelectTrigger className="w-full">
+                <Label>
+                  Филиал <span className="text-destructive">*</span>
+                </Label>
+                <Select
+                  value={formBranchId}
+                  onValueChange={(val) => {
+                    setFormBranchId(val);
+                    clearFieldError("branchId");
+                  }}
+                >
+                  <SelectTrigger className={`w-full ${fieldErrors.branchId ? "border-destructive" : ""}`}>
                     <SelectValue placeholder="Выберите филиал" />
                   </SelectTrigger>
                   <SelectContent
@@ -264,9 +344,14 @@ export function BranchProductFormDialog({
                     ))}
                   </SelectContent>
                 </Select>
+                {fieldErrors.branchId && (
+                  <p className="text-sm text-destructive">{fieldErrors.branchId}</p>
+                )}
               </div>
               <div className="space-y-2">
-                <Label>Товар</Label>
+                <Label>
+                  Товар <span className="text-destructive">*</span>
+                </Label>
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                   <Input
@@ -276,19 +361,23 @@ export function BranchProductFormDialog({
                       setProductSearch(e.target.value);
                       setProductListOpen(true);
                       setProductSearchPage(1);
-                      if (formProductId) setFormProductId("");
+                      if (formProductId) {
+                        setFormProductId("");
+                        setSelectedProduct(null);
+                      }
+                      clearFieldError("productId");
                     }}
                     onFocus={() => setProductListOpen(true)}
                     onBlur={() =>
                       setTimeout(() => setProductListOpen(false), 150)
                     }
-                    className="pl-9 pr-8"
+                    className={`pl-9 pr-8 ${fieldErrors.productId ? "border-destructive" : ""}`}
                   />
                   {formProductId && (
                     <button
                       type="button"
                       onClick={clearProduct}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
                       aria-label="Сбросить товар"
                     >
                       ×
@@ -309,7 +398,8 @@ export function BranchProductFormDialog({
                         </div>
                       ) : productSearchResults.length === 0 ? (
                         <div className="px-3 py-4 text-sm text-muted-foreground text-center">
-                          Нет подходящих товаров
+                          Нет подходящих товаров (если ошибка повторяется —
+                          проверьте доступность сервера)
                         </div>
                       ) : (
                         <>
@@ -318,13 +408,13 @@ export function BranchProductFormDialog({
                               <li key={p.id}>
                                 <button
                                   type="button"
-                                  className="w-full text-left px-3 py-2 text-sm rounded-sm hover:bg-accent focus:bg-accent focus:outline-none flex justify-between items-center"
+                                  className="w-full text-left px-3 py-2 text-sm rounded-sm hover:bg-accent focus:bg-accent focus:outline-none flex justify-between items-center cursor-pointer"
                                   onClick={() => selectProduct(p)}
                                 >
                                   <span>{p.name}</span>
                                   <span className="text-muted-foreground tabular-nums">
                                     {Number(p.price ?? 0).toLocaleString(
-                                      "ru-RU"
+                                      "ru-RU",
                                     )}{" "}
                                     ₽
                                   </span>
@@ -346,7 +436,7 @@ export function BranchProductFormDialog({
                                   disabled={productSearchPage <= 1}
                                   onClick={() =>
                                     setProductSearchPage((p) =>
-                                      Math.max(1, p - 1)
+                                      Math.max(1, p - 1),
                                     )
                                   }
                                 >
@@ -362,15 +452,11 @@ export function BranchProductFormDialog({
                                   size="sm"
                                   className="h-7 px-2"
                                   disabled={
-                                    productSearchPage >=
-                                    productSearchTotalPages
+                                    productSearchPage >= productSearchTotalPages
                                   }
                                   onClick={() =>
                                     setProductSearchPage((p) =>
-                                      Math.min(
-                                        productSearchTotalPages,
-                                        p + 1
-                                      )
+                                      Math.min(productSearchTotalPages, p + 1),
                                     )
                                   }
                                 >
@@ -384,14 +470,17 @@ export function BranchProductFormDialog({
                     </div>
                   )}
                 </div>
-                {formProductId && (
+                {fieldErrors.productId && (
+                  <p className="text-sm text-destructive">{fieldErrors.productId}</p>
+                )}
+                {fieldErrors.duplicate && (
+                  <p className="text-sm text-destructive">{fieldErrors.duplicate}</p>
+                )}
+                {formProductId && selectedCategoryId && (
                   <p className="text-sm text-muted-foreground">
                     Категория:{" "}
                     <span className="text-foreground">
-                      {getCategoryName(
-                        products.find((p) => p.id === Number(formProductId))
-                          ?.categoryId ?? 0
-                      ) || "—"}
+                      {getCategoryName(selectedCategoryId) || "—"}
                     </span>
                   </p>
                 )}
@@ -400,15 +489,24 @@ export function BranchProductFormDialog({
           )}
           <div className="flex items-end gap-2">
             <div className="space-y-2 flex-1">
-              <Label>Цена в филиале</Label>
+              <Label>
+                Цена в филиале <span className="text-destructive">*</span>
+              </Label>
               <Input
                 type="number"
                 min={0}
                 step={0.01}
                 value={formPrice}
-                onChange={(e) => setFormPrice(e.target.value)}
+                onChange={(e) => {
+                  setFormPrice(e.target.value);
+                  clearFieldError("price");
+                }}
                 placeholder="0"
+                className={fieldErrors.price ? "border-destructive" : ""}
               />
+              {fieldErrors.price && (
+                <p className="text-sm text-destructive">{fieldErrors.price}</p>
+              )}
             </div>
             {!editingId && (
               <Button

@@ -1,12 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import {
-  getProductsAll,
-  getCategories,
-  deleteProduct,
-  getImageUrl,
-} from "@/lib/api";
+import { useState } from "react";
+import { deleteProduct, getImageUrl } from "@/lib/api";
+import { useProducts, useCategories, invalidateProducts } from "@/lib/swr";
+import { useDebounce } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,41 +18,39 @@ import { Badge } from "@/components/ui/badge";
 import { DeleteDialog } from "@/components/delete-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Search } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import type { Product, Category } from "./types";
 import { ProductFormDialog } from "./components/ProductFormDialog";
 
+const PAGE_SIZE = 25;
+
 export default function ProductsPage() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const debouncedSearch = useDebounce(search, 300);
+
+  const { data: prodData, isLoading } = useProducts({
+    page,
+    limit: PAGE_SIZE,
+    name: debouncedSearch.trim() || undefined,
+  });
+  const { data: catData } = useCategories({ page: 1, limit: 25 });
+
+  const products = (prodData?.items ?? []) as Product[];
+  const total = prodData?.meta?.total ?? 0;
+  const categories = ((catData as { items?: Category[] })?.items ?? []) as Category[];
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
-
-  const loadData = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    try {
-      const [prodData, catData] = await Promise.all([
-        getProductsAll(),
-        getCategories({ page: 1, limit: 100 }),
-      ]);
-      setProducts((Array.isArray(prodData) ? prodData : []) as Product[]);
-      setCategories(catData?.items || []);
-    } catch {
-      toast.error("Ошибка загрузки данных");
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
 
   const openCreate = () => {
     setEditingProduct(null);
@@ -67,24 +62,9 @@ export default function ProductsPage() {
     setDialogOpen(true);
   };
 
-  const handleSaved = useCallback(
-    (updatedProduct?: Product) => {
-      if (updatedProduct) {
-        setProducts((prev) =>
-          prev.some((p) => p.id === updatedProduct.id)
-            ? prev.map((p) =>
-                p.id === updatedProduct.id
-                  ? { ...p, ...updatedProduct, images: updatedProduct.images }
-                  : p
-              )
-            : [...prev, updatedProduct]
-        );
-      } else {
-        loadData(true);
-      }
-    },
-    [loadData]
-  );
+  const handleSaved = () => {
+    invalidateProducts();
+  };
 
   const handleDelete = async () => {
     if (!deleteId) return;
@@ -93,7 +73,7 @@ export default function ProductsPage() {
       await deleteProduct(deleteId);
       toast.success("Товар удалён");
       setDeleteId(null);
-      loadData(true);
+      invalidateProducts();
     } catch {
       toast.error("Ошибка удаления");
     } finally {
@@ -105,11 +85,7 @@ export default function ProductsPage() {
     return categories.find((c) => c.id === id)?.name || `#${id}`;
   };
 
-  const filteredProducts = search
-    ? products.filter((p) =>
-        p.name.toLowerCase().includes(search.toLowerCase()),
-      )
-    : products;
+  const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
 
   return (
     <div className="space-y-6">
@@ -135,7 +111,10 @@ export default function ProductsPage() {
           <Input
             placeholder="Поиск по имени..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
             className="pl-9 bg-muted/50"
           />
         </div>
@@ -155,7 +134,7 @@ export default function ProductsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? (
+            {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
                   {Array.from({ length: 7 }).map((_, j) => (
@@ -165,7 +144,7 @@ export default function ProductsPage() {
                   ))}
                 </TableRow>
               ))
-            ) : filteredProducts.length === 0 ? (
+            ) : products.length === 0 ? (
               <TableRow>
                 <TableCell
                   colSpan={7}
@@ -175,7 +154,7 @@ export default function ProductsPage() {
                 </TableCell>
               </TableRow>
             ) : (
-              filteredProducts.map((product) => (
+              products.map((product) => (
                 <TableRow key={product.id} className="group">
                   <TableCell className="font-mono text-xs text-muted-foreground">
                     {product.id}
@@ -218,6 +197,10 @@ export default function ProductsPage() {
                               src={getImageUrl(img.url)}
                               alt=""
                               className="w-full h-full object-cover"
+                              onError={(e) => {
+                                const wrapper = e.currentTarget.closest("div");
+                                if (wrapper) wrapper.style.display = "none";
+                              }}
                             />
                           </div>
                         ))}
@@ -257,6 +240,35 @@ export default function ProductsPage() {
           </TableBody>
         </Table>
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Всего: {total}</span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Назад
+            </Button>
+            <span className="flex items-center px-2 text-muted-foreground">
+              {page} / {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Вперёд
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       <ProductFormDialog
         open={dialogOpen}

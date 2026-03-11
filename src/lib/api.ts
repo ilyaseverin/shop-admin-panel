@@ -144,7 +144,7 @@ export async function checkCategorySlugExists(
 ): Promise<boolean> {
   if (!slug?.trim()) return false;
   const norm = slug.trim().toLowerCase();
-  const data = await getCategories({ limit: 5000 });
+  const data = await getCategories({ page: 1, limit: 100 });
   const list = (data as { items?: { id: number; slug: string }[] }).items ?? [];
   return list.some(
     (c: { id: number; slug?: string }) =>
@@ -156,6 +156,7 @@ export async function checkCategorySlugExists(
 export async function getProducts(params?: {
   page?: number;
   limit?: number;
+  /** Поиск по названию (частичное совпадение). Регистронезависимость — на стороне бэкенда. */
   name?: string;
 }) {
   const query = new URLSearchParams();
@@ -172,27 +173,6 @@ export async function getProducts(params?: {
   return { items, meta };
 }
 
-/** Все товары одним запросом (для списков без пагинации). */
-export async function getProductsAll(): Promise<
-  {
-    id: number;
-    name?: string;
-    fullName?: string;
-    slug?: string;
-    price?: number;
-    categoryId?: number;
-    sortOrder?: number;
-    images?: { url: string; type: string }[];
-  }[]
-> {
-  const res = await fetchWithAuth(
-    `${CATALOG_PROXY}/api/admin/products?limit=5000`,
-  );
-  if (!res.ok) throw new Error("Ошибка загрузки товаров");
-  const data = await res.json();
-  return Array.isArray(data) ? data : (data?.items ?? []);
-}
-
 export async function getProduct(id: number) {
   const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/products/${id}`);
   if (!res.ok) throw new Error("Ошибка загрузки товара");
@@ -207,6 +187,18 @@ export async function createProduct(data: {
   fullName?: string;
   description?: string;
   sortOrder?: number;
+  variantGroups?: {
+    name: string;
+    isRequired: boolean;
+    sortOrder?: number;
+    isActive?: boolean;
+    options?: {
+      name: string;
+      priceDelta?: number;
+      sortOrder?: number;
+      isActive?: boolean;
+    }[];
+  }[];
 }) {
   const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/products`, {
     method: "POST",
@@ -250,29 +242,35 @@ export async function checkProductSlugExists(
 ): Promise<boolean> {
   if (!slug?.trim()) return false;
   const norm = slug.trim().toLowerCase();
-  const items = await getProductsAll();
-  return items.some(
+  const data = await getProducts({ page: 1, limit: 100 });
+  return data.items.some(
     (p: { id: number; slug?: string }) =>
       (p.slug ?? "").toLowerCase() === norm && p.id !== excludeId,
   );
 }
 
 // ---- Branches API (Admin: /api/admin/branches) ----
+/** По умолчанию limit=25 (как в спецификации API). */
 export async function getBranches(params?: {
   page?: number;
   limit?: number;
   isActive?: boolean;
-}) {
+}): Promise<{
+  items: { id: number; name: string; address?: string; isActive?: boolean }[];
+  meta?: { total: number; page: number; limit: number };
+}> {
   const query = new URLSearchParams();
   query.set("page", String(params?.page ?? 1));
-  query.set("limit", String(params?.limit ?? 5000));
+  query.set("limit", String(params?.limit ?? 25));
   if (params?.isActive !== undefined)
     query.set("isActive", String(params.isActive));
   const url = `${CATALOG_PROXY}/api/admin/branches?${query.toString()}`;
   const res = await fetchWithAuth(url);
   if (!res.ok) throw new Error("Ошибка загрузки филиалов");
   const data = await res.json();
-  return Array.isArray(data) ? data : (data?.items ?? []);
+  const items = Array.isArray(data) ? data : (data?.items ?? []);
+  const meta = (data as { meta?: { total: number; page: number; limit: number } })?.meta;
+  return { items, meta };
 }
 
 export async function getBranch(id: number) {
@@ -336,12 +334,15 @@ export async function restoreBranch(id: number) {
 }
 
 // ---- Branch Products API ----
+/** Список привязок товар–филиал с серверной фильтрацией (без клиентской фильтрации). */
 export async function getBranchProducts(params?: {
+  branchId?: number;
   isActive?: boolean;
   page?: number;
   limit?: number;
 }) {
   const query = new URLSearchParams();
+  if (params?.branchId != null) query.set("branchId", String(params.branchId));
   if (params?.isActive !== undefined)
     query.set("isActive", String(params.isActive));
   if (params?.page != null) query.set("page", String(params.page));
@@ -351,10 +352,12 @@ export async function getBranchProducts(params?: {
   const res = await fetchWithAuth(url);
   if (!res.ok) throw new Error("Ошибка загрузки товаров по филиалам");
   const data = await res.json();
-  return Array.isArray(data) ? data : (data?.items ?? []);
+  const items = Array.isArray(data) ? data : (data?.items ?? []);
+  const meta = (data as { meta?: { total?: number; page?: number; limit?: number } })?.meta;
+  return { items, meta };
 }
 
-/** Загружает все привязки (и активные, и неактивные). Бэкенд может отдавать по isActive отдельно. */
+/** Загружает все привязки (и активные, и неактивные). Используется только там, где нужен полный список без фильтров (например, проверка дубликатов в форме). */
 export async function getAllBranchProducts(): Promise<
   {
     id: number;
@@ -366,11 +369,11 @@ export async function getAllBranchProducts(): Promise<
   }[]
 > {
   const [activeRes, inactiveRes] = await Promise.all([
-    getBranchProducts({ isActive: true, limit: 5000 }),
-    getBranchProducts({ isActive: false, limit: 5000 }),
+    getBranchProducts({ isActive: true, page: 1, limit: 100 }),
+    getBranchProducts({ isActive: false, page: 1, limit: 100 }),
   ]);
-  const active = Array.isArray(activeRes) ? activeRes : [];
-  const inactive = Array.isArray(inactiveRes) ? inactiveRes : [];
+  const active = Array.isArray(activeRes.items) ? activeRes.items : [];
+  const inactive = Array.isArray(inactiveRes.items) ? inactiveRes.items : [];
   const byId = new Map<
     number,
     {
@@ -467,6 +470,136 @@ export async function restoreBranchProduct(id: number) {
   return res.json();
 }
 
+// ---- Variant Groups API ----
+export async function getVariantGroups(
+  productId: number,
+  params?: { isActive?: boolean },
+) {
+  const query = new URLSearchParams();
+  if (params?.isActive != null) query.set("isActive", String(params.isActive));
+  const qs = query.toString();
+  const url = `${CATALOG_PROXY}/api/admin/products/${productId}/variant-groups${qs ? `?${qs}` : ""}`;
+  const res = await fetchWithAuth(url);
+  if (!res.ok) throw new Error("Ошибка загрузки групп вариантов");
+  const data = await res.json();
+  return Array.isArray(data) ? data : (data?.items ?? []);
+}
+
+export async function createVariantGroup(
+  productId: number,
+  data: {
+    name: string;
+    isRequired?: boolean;
+    sortOrder?: number;
+    isActive?: boolean;
+  },
+) {
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/products/${productId}/variant-groups`,
+    { method: "POST", body: JSON.stringify(data) },
+  );
+  if (!res.ok) throw new Error("Ошибка создания группы вариантов");
+  return res.json();
+}
+
+export async function updateVariantGroup(
+  productId: number,
+  groupId: number,
+  data: {
+    name?: string;
+    isRequired?: boolean;
+    sortOrder?: number;
+    isActive?: boolean;
+  },
+) {
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/products/${productId}/variant-groups/${groupId}`,
+    { method: "PATCH", body: JSON.stringify(data) },
+  );
+  if (!res.ok) throw new Error("Ошибка обновления группы вариантов");
+  return res.json();
+}
+
+export async function deleteVariantGroup(productId: number, groupId: number) {
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/products/${productId}/variant-groups/${groupId}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) throw new Error("Ошибка удаления группы вариантов");
+}
+
+export async function restoreVariantGroup(productId: number, groupId: number) {
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/products/${productId}/variant-groups/${groupId}/restore`,
+    { method: "PATCH" },
+  );
+  if (!res.ok) throw new Error("Ошибка восстановления группы вариантов");
+  return res.json();
+}
+
+// ---- Variant Options API ----
+export async function createVariantOption(
+  productId: number,
+  groupId: number,
+  data: {
+    name: string;
+    priceDelta?: number;
+    sortOrder?: number;
+    isActive?: boolean;
+  },
+) {
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/products/${productId}/variant-groups/${groupId}/options`,
+    { method: "POST", body: JSON.stringify(data) },
+  );
+  if (!res.ok) throw new Error("Ошибка создания опции варианта");
+  return res.json();
+}
+
+export async function updateVariantOption(
+  productId: number,
+  groupId: number,
+  optionId: number,
+  data: {
+    name?: string;
+    priceDelta?: number;
+    sortOrder?: number;
+    isActive?: boolean;
+  },
+) {
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/products/${productId}/variant-groups/${groupId}/options/${optionId}`,
+    { method: "PATCH", body: JSON.stringify(data) },
+  );
+  if (!res.ok) throw new Error("Ошибка обновления опции варианта");
+  return res.json();
+}
+
+export async function deleteVariantOption(
+  productId: number,
+  groupId: number,
+  optionId: number,
+) {
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/products/${productId}/variant-groups/${groupId}/options/${optionId}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) throw new Error("Ошибка удаления опции варианта");
+}
+
+export async function restoreVariantOption(
+  productId: number,
+  groupId: number,
+  optionId: number,
+) {
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/products/${productId}/variant-groups/${groupId}/options/${optionId}/restore`,
+    { method: "PATCH" },
+  );
+  if (!res.ok) throw new Error("Ошибка восстановления опции варианта");
+  return res.json();
+}
+
 // ---- Image API ----
 // image_service: POST /images/upload — multipart/form-data: file, entityType, entityId, imageType? (UploadImageDto).
 export async function uploadImage(
@@ -487,7 +620,7 @@ export async function uploadImage(
     headers["Authorization"] = `Bearer ${tokens.accessToken}`;
   }
 
-  const res = await fetch(`${IMAGE_PROXY}/images/upload`, {
+  const res = await fetch(`${IMAGE_PROXY}/api/images/upload`, {
     method: "POST",
     headers,
     body: formData,
@@ -497,5 +630,46 @@ export async function uploadImage(
 }
 
 export function getImageUrl(externalId: string) {
-  return `${IMAGE_PROXY}/images/${externalId}`;
+  return `${IMAGE_PROXY}/api/images/${externalId}`;
+}
+
+export async function updateImageType(externalId: string, imageType: string) {
+  const res = await fetchWithAuth(`${IMAGE_PROXY}/api/images/${externalId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ imageType }),
+  });
+  if (!res.ok) {
+    throw new Error(`Ошибка обновления типа изображения (${res.status})`);
+  }
+  const text = await res.text().catch(() => "");
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function deleteImage(externalId: string) {
+  const res = await fetchWithAuth(`${IMAGE_PROXY}/api/images/${externalId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    console.error(
+      "[deleteImage] DELETE failed:",
+      res.status,
+      text,
+      "externalId:",
+      externalId,
+    );
+    throw new Error(`Ошибка удаления изображения (${res.status})`);
+  }
+}
+
+export async function getImageDetails(externalId: string) {
+  const res = await fetchWithAuth(
+    `${IMAGE_PROXY}/api/admin/images/${externalId}`,
+  );
+  if (!res.ok) throw new Error("Ошибка загрузки данных изображения");
+  return res.json();
 }

@@ -1,11 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
-import {
-  getBranches,
-  deleteBranch,
-  restoreBranch,
-} from "@/lib/api";
+import { useState } from "react";
+import { deleteBranch, restoreBranch } from "@/lib/api";
+import { useBranches, invalidateBranches } from "@/lib/swr";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -26,49 +23,30 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import type { Branch } from "./types";
 import { BranchFormDialog } from "./components/BranchFormDialog";
 
 export default function BranchesPage() {
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
-
-  const [deleteId, setDeleteId] = useState<number | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [togglingId, setTogglingId] = useState<number | null>(null);
-
-  /** Фильтр по статусу: по умолчанию только активные (неактивные не отображаются). */
   const [statusFilter, setStatusFilter] = useState<
     "active" | "inactive" | "all"
   >("active");
+  const [page, setPage] = useState(1);
 
-  const filteredBranches = useMemo(() => {
-    if (statusFilter === "active")
-      return branches.filter((b) => b.isActive !== false);
-    if (statusFilter === "inactive")
-      return branches.filter((b) => b.isActive === false);
-    return branches;
-  }, [branches, statusFilter]);
+  const isActive =
+    statusFilter === "all" ? undefined : statusFilter === "active";
 
-  const loadBranches = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    try {
-      const data = await getBranches();
-      setBranches(Array.isArray(data) ? data : []);
-    } catch {
-      toast.error("Ошибка загрузки филиалов");
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, []);
+  const { data, isLoading } = useBranches({ page, limit: 25, isActive });
 
-  useEffect(() => {
-    loadBranches();
-  }, [loadBranches]);
+  const branches = (data?.items ?? []) as Branch[];
+  const total = data?.meta?.total ?? 0;
+  const totalPages = Math.ceil(total / 25) || 1;
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
 
   const openCreate = () => {
     setEditingBranch(null);
@@ -80,9 +58,9 @@ export default function BranchesPage() {
     setDialogOpen(true);
   };
 
-  const handleSaved = useCallback(() => {
-    loadBranches(true);
-  }, [loadBranches]);
+  const handleSaved = () => {
+    invalidateBranches();
+  };
 
   const handleToggleActive = async (branch: Branch) => {
     setTogglingId(branch.id);
@@ -94,7 +72,7 @@ export default function BranchesPage() {
         await restoreBranch(branch.id);
         toast.success("Филиал активирован");
       }
-      loadBranches(true);
+      invalidateBranches();
     } catch {
       toast.error("Ошибка смены статуса");
     } finally {
@@ -109,7 +87,7 @@ export default function BranchesPage() {
       await deleteBranch(deleteId);
       toast.success("Филиал удалён");
       setDeleteId(null);
-      loadBranches(true);
+      invalidateBranches();
     } catch {
       toast.error("Ошибка удаления");
     } finally {
@@ -140,9 +118,10 @@ export default function BranchesPage() {
           <span className="text-sm text-muted-foreground">Статус:</span>
           <Select
             value={statusFilter}
-            onValueChange={(v: "active" | "inactive" | "all") =>
-              setStatusFilter(v)
-            }
+            onValueChange={(v: "active" | "inactive" | "all") => {
+              setStatusFilter(v);
+              setPage(1);
+            }}
           >
             <SelectTrigger className="w-[180px]">
               <SelectValue />
@@ -170,7 +149,7 @@ export default function BranchesPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? (
+            {isLoading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i}>
                   {Array.from({ length: 7 }).map((_, j) => (
@@ -180,19 +159,17 @@ export default function BranchesPage() {
                   ))}
                 </TableRow>
               ))
-            ) : filteredBranches.length === 0 ? (
+            ) : branches.length === 0 ? (
               <TableRow>
                 <TableCell
                   colSpan={7}
                   className="text-center text-muted-foreground py-12"
                 >
-                  {branches.length === 0
-                    ? "Филиалы не найдены"
-                    : "Нет филиалов по выбранному фильтру"}
+                  Филиалы не найдены
                 </TableCell>
               </TableRow>
             ) : (
-              filteredBranches.map((branch) => (
+              branches.map((branch) => (
                 <TableRow key={branch.id} className="group">
                   <TableCell className="font-mono text-xs text-muted-foreground">
                     {branch.id}
@@ -237,6 +214,7 @@ export default function BranchesPage() {
                         variant="ghost"
                         size="icon"
                         onClick={() => setDeleteId(branch.id)}
+                        disabled={!(branch.isActive ?? true)}
                         className="h-8 w-8 text-muted-foreground hover:text-destructive"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -249,6 +227,35 @@ export default function BranchesPage() {
           </TableBody>
         </Table>
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Всего: {total}</span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Назад
+            </Button>
+            <span className="flex items-center px-2 text-muted-foreground">
+              {page} / {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Вперёд
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       <BranchFormDialog
         open={dialogOpen}

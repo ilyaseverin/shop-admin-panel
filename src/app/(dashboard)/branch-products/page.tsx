@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useState } from "react";
 import {
-  getAllBranchProducts,
-  getProductsAll,
-  getBranches,
-  getCategories,
   deleteBranchProduct,
   restoreBranchProduct,
 } from "@/lib/api";
+import {
+  useBranchProducts,
+  useProducts,
+  useBranches,
+  useCategories,
+  invalidateBranchProducts,
+} from "@/lib/swr";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -36,68 +39,47 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import type { BranchProduct, Product, Branch, Category } from "./types";
 import { BranchProductFormDialog } from "./components/BranchProductFormDialog";
 
 export default function BranchProductsPage() {
-  const [branchProducts, setBranchProducts] = useState<BranchProduct[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
   const [branchFilter, setBranchFilter] = useState<string>("all");
-  /** Фильтр по статусу: по умолчанию только активные привязки. */
   const [statusFilter, setStatusFilter] = useState<
     "active" | "inactive" | "all"
   >("active");
+  const [bpPage, setBpPage] = useState(1);
+
+  const branchId =
+    branchFilter === "all" ? undefined : Number(branchFilter);
+  const isActive =
+    statusFilter === "all" ? undefined : statusFilter === "active";
+
+  const { data: bpRes, isLoading } = useBranchProducts({
+    branchId,
+    isActive,
+    page: bpPage,
+    limit: 25,
+  });
+  const { data: prodRes } = useProducts({ page: 1, limit: 25 });
+  const { data: branchRes } = useBranches({ isActive: true, limit: 25 });
+  const { data: catRes } = useCategories({ page: 1, limit: 25 });
+
+  const branchProducts = (bpRes?.items ?? []) as BranchProduct[];
+  const bpTotal = bpRes?.meta?.total ?? branchProducts.length;
+  const products = (prodRes?.items ?? []) as Product[];
+  const branches = (branchRes?.items ?? []) as Branch[];
+  const categories = ((catRes as { items?: Category[] })?.items ?? []) as Category[];
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<BranchProduct | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [togglingId, setTogglingId] = useState<number | null>(null);
 
-  const loadData = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    try {
-      const [bpRes, prodRes, branchRes, catRes] = await Promise.all([
-        getAllBranchProducts(),
-        getProductsAll(),
-        getBranches({ isActive: true }),
-        getCategories({ page: 1, limit: 500 }),
-      ]);
-      setBranchProducts(Array.isArray(bpRes) ? bpRes : []);
-      setProducts((Array.isArray(prodRes) ? prodRes : []) as Product[]);
-      setBranches((Array.isArray(branchRes) ? branchRes : []) as Branch[]);
-      setCategories(catRes?.items ?? []);
-    } catch {
-      toast.error("Ошибка загрузки данных");
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const handleSaved = useCallback(() => {
-    loadData(true);
-  }, [loadData]);
-
-  const filteredByBranch = useMemo(() => {
-    if (branchFilter === "all") return branchProducts;
-    const id = Number(branchFilter);
-    return branchProducts.filter((bp) => bp.branchId === id);
-  }, [branchProducts, branchFilter]);
-
-  const filteredByBranchAndStatus = useMemo(() => {
-    if (statusFilter === "active")
-      return filteredByBranch.filter((bp) => bp.isActive);
-    if (statusFilter === "inactive")
-      return filteredByBranch.filter((bp) => !bp.isActive);
-    return filteredByBranch;
-  }, [filteredByBranch, statusFilter]);
+  const handleSaved = () => {
+    invalidateBranchProducts();
+  };
 
   const getBranchName = (id: number) =>
     branches.find((b) => b.id === id)?.name ?? `#${id}`;
@@ -126,7 +108,7 @@ export default function BranchProductsPage() {
         await restoreBranchProduct(bp.id);
         toast.success("Товар активирован в филиале");
       }
-      await loadData(true);
+      invalidateBranchProducts();
     } catch {
       toast.error("Ошибка смены статуса");
     } finally {
@@ -141,16 +123,16 @@ export default function BranchProductsPage() {
       await deleteBranchProduct(deleteId);
       toast.success("Товар отвязан от филиала");
       setDeleteId(null);
-      await loadData(true);
+      invalidateBranchProducts();
     } catch {
       toast.error("Ошибка отвязки. Проверьте, что запись исчезла из списка.");
-      await loadData(true);
+      invalidateBranchProducts();
     } finally {
       setDeleting(false);
     }
   };
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-9 w-64" />
@@ -181,7 +163,13 @@ export default function BranchProductsPage() {
           <Label className="text-sm text-muted-foreground whitespace-nowrap">
             Филиал:
           </Label>
-          <Select value={branchFilter} onValueChange={setBranchFilter}>
+          <Select
+            value={branchFilter}
+            onValueChange={(v) => {
+              setBranchFilter(v);
+              setBpPage(1);
+            }}
+          >
             <SelectTrigger className="w-[220px]">
               <SelectValue placeholder="Все филиалы" />
             </SelectTrigger>
@@ -201,9 +189,10 @@ export default function BranchProductsPage() {
           </Label>
           <Select
             value={statusFilter}
-            onValueChange={(v: "active" | "inactive" | "all") =>
-              setStatusFilter(v)
-            }
+            onValueChange={(v: "active" | "inactive" | "all") => {
+              setStatusFilter(v);
+              setBpPage(1);
+            }}
           >
             <SelectTrigger className="w-[180px]">
               <SelectValue />
@@ -231,22 +220,21 @@ export default function BranchProductsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredByBranchAndStatus.length === 0 ? (
+            {branchProducts.length === 0 ? (
               <TableRow>
                 <TableCell
                   colSpan={7}
                   className="text-center text-muted-foreground py-8"
                 >
-                  {filteredByBranch.length === 0
-                    ? "Нет привязок. Нажмите «Привязать товар к филиалу»."
-                    : "Нет привязок по выбранному фильтру."}
+                  Нет привязок по выбранному фильтру. Нажмите «Привязать товар к
+                  филиалу» или измените фильтры.
                 </TableCell>
               </TableRow>
             ) : (
-              filteredByBranchAndStatus.map((bp) => {
+              branchProducts.map((bp) => {
                 const product = products.find((p) => p.id === bp.productId);
                 return (
-                  <TableRow key={bp.id}>
+                  <TableRow key={bp.id} className="group">
                     <TableCell className="font-medium">
                       {getBranchName(bp.branchId)}
                     </TableCell>
@@ -266,22 +254,24 @@ export default function BranchProductsPage() {
                         title={bp.isActive ? "Деактивировать" : "Активировать"}
                       />
                     </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <Button
                           variant="ghost"
                           size="icon"
                           onClick={() => openEdit(bp)}
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
                         >
-                          <Pencil className="h-4 w-4" />
+                          <Pencil className="w-3.5 h-3.5" />
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon"
                           onClick={() => setDeleteId(bp.id)}
-                          className="text-destructive hover:text-destructive"
+                          disabled={!bp.isActive}
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </Button>
                       </div>
                     </TableCell>
@@ -293,6 +283,37 @@ export default function BranchProductsPage() {
         </Table>
       </div>
 
+      {bpTotal > 25 && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">
+            Всего: {bpTotal}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={bpPage <= 1}
+              onClick={() => setBpPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Назад
+            </Button>
+            <span className="flex items-center px-2 text-muted-foreground">
+              {bpPage} / {Math.ceil(bpTotal / 25) || 1}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={bpPage >= Math.ceil(bpTotal / 25)}
+              onClick={() => setBpPage((p) => p + 1)}
+            >
+              Вперёд
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       <BranchProductFormDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
@@ -300,7 +321,6 @@ export default function BranchProductsPage() {
         branches={branches}
         products={products}
         categories={categories}
-        branchProducts={branchProducts}
         onSaved={handleSaved}
       />
 

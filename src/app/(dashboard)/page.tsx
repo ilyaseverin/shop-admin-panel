@@ -1,47 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getCategories, getProductsAll, getBranches } from "@/lib/api";
+import { useProducts, useCategories, useBranches } from "@/lib/swr";
 import { FolderTree, Package, Building2, TrendingUp } from "lucide-react";
 
-interface Stats {
-  categories: number;
-  products: number;
-  branches: number;
-}
-
 export default function DashboardPage() {
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: catData, isLoading: catLoading } = useCategories({ page: 1, limit: 1 });
+  const { data: prodData, isLoading: prodLoading } = useProducts({ page: 1, limit: 1 });
+  const { data: branchData, isLoading: branchLoading } = useBranches({ page: 1, limit: 1 });
 
-  useEffect(() => {
-    async function loadStats() {
-      try {
-        const [catData, prodData, branchData] = await Promise.all([
-          getCategories({ page: 1, limit: 1 }),
-          getProductsAll(),
-          getBranches(),
-        ]);
-        setStats({
-          categories: catData?.meta?.total ?? catData?.items?.length ?? 0,
-          products: Array.isArray(prodData) ? prodData.length : 0,
-          branches: Array.isArray(branchData) ? branchData.length : 0,
-        });
-      } catch {
-        setStats({ categories: 0, products: 0, branches: 0 });
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadStats();
-  }, []);
+  const loading = catLoading || prodLoading || branchLoading;
+
+  const stats = {
+    categories: (catData as { meta?: { total?: number } })?.meta?.total ?? 0,
+    products: prodData?.meta?.total ?? 0,
+    branches: branchData?.meta?.total ?? 0,
+  };
 
   const cards = [
     {
       title: "Категории",
-      value: stats?.categories ?? 0,
+      value: stats.categories,
       icon: FolderTree,
       gradient: "from-indigo-500 to-blue-600",
       shadow: "shadow-indigo-500/20",
@@ -49,7 +29,7 @@ export default function DashboardPage() {
     },
     {
       title: "Товары",
-      value: stats?.products ?? 0,
+      value: stats.products,
       icon: Package,
       gradient: "from-emerald-500 to-teal-600",
       shadow: "shadow-emerald-500/20",
@@ -57,7 +37,7 @@ export default function DashboardPage() {
     },
     {
       title: "Филиалы",
-      value: stats?.branches ?? 0,
+      value: stats.branches,
       icon: Building2,
       gradient: "from-amber-500 to-orange-600",
       shadow: "shadow-amber-500/20",

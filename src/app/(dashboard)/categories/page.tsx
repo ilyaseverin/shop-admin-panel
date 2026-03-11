@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { getCategories, deleteCategory } from "@/lib/api";
+import { useState } from "react";
+import { deleteCategory, getCategories } from "@/lib/api";
+import { useCategories, invalidateCategories } from "@/lib/swr";
+import { useDebounce } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -28,54 +30,45 @@ import type { Category } from "./types";
 import { CategoryFormDialog } from "./components/CategoryFormDialog";
 
 export default function CategoriesPage() {
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [allCategories, setAllCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 300);
   const limit = 10;
 
+  const { data: listData, isLoading } = useCategories({
+    page,
+    limit,
+    name: debouncedSearch.trim() || undefined,
+  });
+
+  const categories = ((listData as { items?: Category[] })?.items ?? []) as Category[];
+  const total = (listData as { meta?: { total?: number } })?.meta?.total ?? 0;
+
+  const [allCategories, setAllCategories] = useState<Category[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
-
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
-
-  const loadCategories = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    try {
-      const [listData, allData] = await Promise.all([
-        getCategories({ page, limit, name: search || undefined }),
-        getCategories({ page: 1, limit: 1000 }), // Load all for dropdown
-      ]);
-      setCategories(listData.items || []);
-      setTotal(listData.meta?.total || 0);
-      setAllCategories(allData.items || []);
-    } catch {
-      toast.error("Ошибка загрузки категорий");
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, [page, search]);
-
-  useEffect(() => {
-    loadCategories();
-  }, [loadCategories]);
 
   const openCreate = () => {
     setEditingCategory(null);
     setDialogOpen(true);
+    getCategories({ page: 1, limit: 25 })
+      .then((data) => setAllCategories((data as { items?: Category[] }).items ?? []))
+      .catch(() => setAllCategories([]));
   };
 
   const openEdit = (cat: Category) => {
     setEditingCategory(cat);
     setDialogOpen(true);
+    getCategories({ page: 1, limit: 25 })
+      .then((data) => setAllCategories((data as { items?: Category[] }).items ?? []))
+      .catch(() => setAllCategories([]));
   };
 
-  const handleSaved = useCallback(() => {
-    loadCategories(true);
-  }, [loadCategories]);
+  const handleSaved = () => {
+    invalidateCategories();
+  };
 
   const handleDelete = async () => {
     if (!deleteId) return;
@@ -84,7 +77,7 @@ export default function CategoriesPage() {
       await deleteCategory(deleteId);
       toast.success("Категория удалена");
       setDeleteId(null);
-      loadCategories(true);
+      invalidateCategories();
     } catch {
       toast.error("Ошибка удаления");
     } finally {
@@ -137,7 +130,7 @@ export default function CategoriesPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? (
+            {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
                   {Array.from({ length: 6 }).map((_, j) => (
