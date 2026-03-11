@@ -173,27 +173,6 @@ export async function getProducts(params?: {
   return { items, meta };
 }
 
-/** Все товары одним запросом (для списков без пагинации). */
-export async function getProductsAll(): Promise<
-  {
-    id: number;
-    name?: string;
-    fullName?: string;
-    slug?: string;
-    price?: number;
-    categoryId?: number;
-    sortOrder?: number;
-    images?: { url: string; type: string }[];
-  }[]
-> {
-  const res = await fetchWithAuth(
-    `${CATALOG_PROXY}/api/admin/products?limit=25`,
-  );
-  if (!res.ok) throw new Error("Ошибка загрузки товаров");
-  const data = await res.json();
-  return Array.isArray(data) ? data : (data?.items ?? []);
-}
-
 export async function getProduct(id: number) {
   const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/products/${id}`);
   if (!res.ok) throw new Error("Ошибка загрузки товара");
@@ -263,8 +242,8 @@ export async function checkProductSlugExists(
 ): Promise<boolean> {
   if (!slug?.trim()) return false;
   const norm = slug.trim().toLowerCase();
-  const items = await getProductsAll();
-  return items.some(
+  const data = await getProducts({ page: 1, limit: 100 });
+  return data.items.some(
     (p: { id: number; slug?: string }) =>
       (p.slug ?? "").toLowerCase() === norm && p.id !== excludeId,
   );

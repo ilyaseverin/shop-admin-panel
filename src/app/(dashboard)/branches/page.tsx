@@ -1,11 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import {
-  getBranches,
-  deleteBranch,
-  restoreBranch,
-} from "@/lib/api";
+import { useState } from "react";
+import { deleteBranch, restoreBranch } from "@/lib/api";
+import { useBranches, invalidateBranches } from "@/lib/swr";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -31,44 +28,25 @@ import type { Branch } from "./types";
 import { BranchFormDialog } from "./components/BranchFormDialog";
 
 export default function BranchesPage() {
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
-
-  const [deleteId, setDeleteId] = useState<number | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [togglingId, setTogglingId] = useState<number | null>(null);
-
-  /** Фильтр по статусу: по умолчанию только активные. */
   const [statusFilter, setStatusFilter] = useState<
     "active" | "inactive" | "all"
   >("active");
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
+
+  const isActive =
+    statusFilter === "all" ? undefined : statusFilter === "active";
+
+  const { data, isLoading } = useBranches({ page, limit: 25, isActive });
+
+  const branches = (data?.items ?? []) as Branch[];
+  const total = data?.meta?.total ?? 0;
   const totalPages = Math.ceil(total / 25) || 1;
 
-  const loadBranches = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    try {
-      const isActive =
-        statusFilter === "all"
-          ? undefined
-          : statusFilter === "active";
-      const data = await getBranches({ page, limit: 25, isActive });
-      setBranches(data.items ?? []);
-      setTotal(data.meta?.total ?? 0);
-    } catch {
-      toast.error("Ошибка загрузки филиалов");
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, [page, statusFilter]);
-
-  useEffect(() => {
-    loadBranches();
-  }, [loadBranches]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
 
   const openCreate = () => {
     setEditingBranch(null);
@@ -80,9 +58,9 @@ export default function BranchesPage() {
     setDialogOpen(true);
   };
 
-  const handleSaved = useCallback(() => {
-    loadBranches(true);
-  }, [loadBranches]);
+  const handleSaved = () => {
+    invalidateBranches();
+  };
 
   const handleToggleActive = async (branch: Branch) => {
     setTogglingId(branch.id);
@@ -94,7 +72,7 @@ export default function BranchesPage() {
         await restoreBranch(branch.id);
         toast.success("Филиал активирован");
       }
-      loadBranches(true);
+      invalidateBranches();
     } catch {
       toast.error("Ошибка смены статуса");
     } finally {
@@ -109,7 +87,7 @@ export default function BranchesPage() {
       await deleteBranch(deleteId);
       toast.success("Филиал удалён");
       setDeleteId(null);
-      loadBranches(true);
+      invalidateBranches();
     } catch {
       toast.error("Ошибка удаления");
     } finally {
@@ -171,7 +149,7 @@ export default function BranchesPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? (
+            {isLoading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i}>
                   {Array.from({ length: 7 }).map((_, j) => (

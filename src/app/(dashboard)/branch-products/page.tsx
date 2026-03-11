@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState } from "react";
 import {
-  getBranchProducts,
-  getAllBranchProducts,
-  getProduct,
-  getBranches,
-  getCategories,
   deleteBranchProduct,
   restoreBranchProduct,
 } from "@/lib/api";
+import {
+  useBranchProducts,
+  useProducts,
+  useBranches,
+  useCategories,
+  invalidateBranchProducts,
+} from "@/lib/swr";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -42,79 +44,42 @@ import type { BranchProduct, Product, Branch, Category } from "./types";
 import { BranchProductFormDialog } from "./components/BranchProductFormDialog";
 
 export default function BranchProductsPage() {
-  /** Список для таблицы (серверная фильтрация по филиалу и статусу). */
-  const [branchProducts, setBranchProducts] = useState<BranchProduct[]>([]);
-  /** Полный список привязок для проверки дубликатов в диалоге. */
-  const [allBranchProducts, setAllBranchProducts] = useState<BranchProduct[]>(
-    [],
-  );
-  const [products, setProducts] = useState<Product[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
   const [branchFilter, setBranchFilter] = useState<string>("all");
-  /** Фильтр по статусу: по умолчанию только активные привязки. */
   const [statusFilter, setStatusFilter] = useState<
     "active" | "inactive" | "all"
   >("active");
   const [bpPage, setBpPage] = useState(1);
-  const [bpTotal, setBpTotal] = useState(0);
+
+  const branchId =
+    branchFilter === "all" ? undefined : Number(branchFilter);
+  const isActive =
+    statusFilter === "all" ? undefined : statusFilter === "active";
+
+  const { data: bpRes, isLoading } = useBranchProducts({
+    branchId,
+    isActive,
+    page: bpPage,
+    limit: 25,
+  });
+  const { data: prodRes } = useProducts({ page: 1, limit: 25 });
+  const { data: branchRes } = useBranches({ isActive: true, limit: 25 });
+  const { data: catRes } = useCategories({ page: 1, limit: 25 });
+
+  const branchProducts = (bpRes?.items ?? []) as BranchProduct[];
+  const bpTotal = bpRes?.meta?.total ?? branchProducts.length;
+  const products = (prodRes?.items ?? []) as Product[];
+  const branches = (branchRes?.items ?? []) as Branch[];
+  const categories = ((catRes as { items?: Category[] })?.items ?? []) as Category[];
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<BranchProduct | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [togglingId, setTogglingId] = useState<number | null>(null);
 
-  const loadData = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    try {
-      const branchId =
-        branchFilter === "all" ? undefined : Number(branchFilter);
-      const isActive =
-        statusFilter === "all"
-          ? undefined
-          : statusFilter === "active";
-      const [bpRes, allBpRes, branchRes, catRes] = await Promise.all([
-        getBranchProducts({
-          branchId,
-          isActive,
-          page: bpPage,
-          limit: 25,
-        }),
-        getAllBranchProducts(),
-        getBranches({ isActive: true, limit: 25 }),
-        getCategories({ page: 1, limit: 25 }),
-      ]);
-      const bpItems = Array.isArray(bpRes.items) ? bpRes.items : [];
-      const allBp = Array.isArray(allBpRes) ? allBpRes : [];
-      setBranchProducts(bpItems);
-      setBpTotal(bpRes.meta?.total ?? bpItems.length);
-      setAllBranchProducts(allBp);
-      setBranches((branchRes?.items ?? []) as Branch[]);
-      setCategories(catRes?.items ?? []);
-
-      const productIds = [
-        ...new Set([...bpItems, ...allBp].map((bp) => bp.productId)),
-      ];
-      const productsList: Product[] =
-        productIds.length > 0
-          ? await Promise.all(productIds.map((id) => getProduct(id)))
-          : [];
-      setProducts(productsList);
-    } catch {
-      toast.error("Ошибка загрузки данных");
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, [branchFilter, statusFilter, bpPage]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const handleSaved = useCallback(() => {
-    loadData(true);
-  }, [loadData]);
+  const handleSaved = () => {
+    invalidateBranchProducts();
+  };
 
   const getBranchName = (id: number) =>
     branches.find((b) => b.id === id)?.name ?? `#${id}`;
@@ -143,7 +108,7 @@ export default function BranchProductsPage() {
         await restoreBranchProduct(bp.id);
         toast.success("Товар активирован в филиале");
       }
-      await loadData(true);
+      invalidateBranchProducts();
     } catch {
       toast.error("Ошибка смены статуса");
     } finally {
@@ -158,16 +123,16 @@ export default function BranchProductsPage() {
       await deleteBranchProduct(deleteId);
       toast.success("Товар отвязан от филиала");
       setDeleteId(null);
-      await loadData(true);
+      invalidateBranchProducts();
     } catch {
       toast.error("Ошибка отвязки. Проверьте, что запись исчезла из списка.");
-      await loadData(true);
+      invalidateBranchProducts();
     } finally {
       setDeleting(false);
     }
   };
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-9 w-64" />
@@ -354,7 +319,6 @@ export default function BranchProductsPage() {
         branches={branches}
         products={products}
         categories={categories}
-        branchProducts={allBranchProducts}
         onSaved={handleSaved}
       />
 

@@ -4,9 +4,11 @@ import { useEffect, useState } from "react";
 import { useDebounce } from "@/lib/utils";
 import {
   getProducts,
+  getAllBranchProducts,
   createBranchProduct,
   updateBranchProduct,
 } from "@/lib/api";
+import { invalidateBranchProducts } from "@/lib/swr";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,7 +40,6 @@ interface BranchProductFormDialogProps {
   branches: Branch[];
   products: Product[];
   categories: Category[];
-  branchProducts: BranchProduct[];
   onSaved: () => void;
 }
 
@@ -49,7 +50,6 @@ export function BranchProductFormDialog({
   branches,
   products,
   categories,
-  branchProducts,
   onSaved,
 }: BranchProductFormDialogProps) {
   const editingId = editingItem?.id ?? null;
@@ -70,6 +70,9 @@ export function BranchProductFormDialog({
   const [productSearchLoading, setProductSearchLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const [allBranchProducts, setAllBranchProducts] = useState<BranchProduct[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+
   const debouncedProductSearch = useDebounce(productSearch, 300);
   const productSearchTotalPages =
     Math.ceil(productSearchTotal / PRODUCT_SEARCH_LIMIT) || 1;
@@ -80,8 +83,6 @@ export function BranchProductFormDialog({
     products.find((p) => p.id === id)?.name ?? `#${id}`;
   const getCategoryName = (id: number) =>
     categories.find((c) => c.id === id)?.name ?? "";
-  const getProductPrice = (id: number) =>
-    products.find((p) => p.id === id)?.price ?? 0;
 
   useEffect(() => {
     if (!open) return;
@@ -91,6 +92,7 @@ export function BranchProductFormDialog({
       setFormPrice(String(editingItem.price));
       setFormStock(String(editingItem.stock));
       setFormIsActive(editingItem.isActive);
+      setSelectedProduct(null);
     } else {
       setFormBranchId("");
       setFormProductId("");
@@ -101,6 +103,10 @@ export function BranchProductFormDialog({
       setProductListOpen(false);
       setProductSearchPage(1);
       setProductSearchResults([]);
+      setSelectedProduct(null);
+      getAllBranchProducts()
+        .then(setAllBranchProducts)
+        .catch(() => setAllBranchProducts([]));
     }
   }, [open, editingItem]);
 
@@ -141,11 +147,13 @@ export function BranchProductFormDialog({
     setProductSearch(p.name || "");
     setProductListOpen(false);
     setFormPrice(String(p.price ?? 0));
+    setSelectedProduct(p);
   };
 
   const clearProduct = () => {
     setFormProductId("");
     setProductSearch("");
+    setSelectedProduct(null);
   };
 
   const pullPriceFromProduct = () => {
@@ -153,8 +161,8 @@ export function BranchProductFormDialog({
       toast.error("Сначала выберите товар");
       return;
     }
-    const price = getProductPrice(Number(formProductId));
-    setFormPrice(String(price));
+    const p = selectedProduct ?? products.find((pr) => pr.id === Number(formProductId));
+    setFormPrice(String(p?.price ?? 0));
     toast.success("Цена подставлена из товара");
   };
 
@@ -174,6 +182,7 @@ export function BranchProductFormDialog({
         });
         toast.success("Товар в филиале обновлён");
         onOpenChange(false);
+        invalidateBranchProducts();
         onSaved();
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Ошибка сохранения";
@@ -195,7 +204,7 @@ export function BranchProductFormDialog({
     }
     const branchId = Number(formBranchId);
     const productId = Number(formProductId);
-    const exists = branchProducts.some(
+    const exists = allBranchProducts.some(
       (bp) => bp.branchId === branchId && bp.productId === productId,
     );
     if (exists) {
@@ -213,6 +222,7 @@ export function BranchProductFormDialog({
       });
       toast.success("Товар привязан к филиалу");
       onOpenChange(false);
+      invalidateBranchProducts();
       onSaved();
     } catch (e: unknown) {
       const status = (e as { status?: number })?.status;
@@ -228,6 +238,9 @@ export function BranchProductFormDialog({
       setSaving(false);
     }
   };
+
+  const selectedCategoryId = selectedProduct?.categoryId
+    ?? products.find((p) => p.id === Number(formProductId))?.categoryId;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -285,7 +298,10 @@ export function BranchProductFormDialog({
                       setProductSearch(e.target.value);
                       setProductListOpen(true);
                       setProductSearchPage(1);
-                      if (formProductId) setFormProductId("");
+                      if (formProductId) {
+                        setFormProductId("");
+                        setSelectedProduct(null);
+                      }
                     }}
                     onFocus={() => setProductListOpen(true)}
                     onBlur={() =>
@@ -390,14 +406,11 @@ export function BranchProductFormDialog({
                     </div>
                   )}
                 </div>
-                {formProductId && (
+                {formProductId && selectedCategoryId && (
                   <p className="text-sm text-muted-foreground">
                     Категория:{" "}
                     <span className="text-foreground">
-                      {getCategoryName(
-                        products.find((p) => p.id === Number(formProductId))
-                          ?.categoryId ?? 0,
-                      ) || "—"}
+                      {getCategoryName(selectedCategoryId) || "—"}
                     </span>
                   </p>
                 )}

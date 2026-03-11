@@ -1,12 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import {
-  getProducts,
-  getCategories,
-  deleteProduct,
-  getImageUrl,
-} from "@/lib/api";
+import { useState } from "react";
+import { deleteProduct, getImageUrl } from "@/lib/api";
+import { useProducts, useCategories, invalidateProducts } from "@/lib/swr";
+import { useDebounce } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -35,43 +32,25 @@ import { ProductFormDialog } from "./components/ProductFormDialog";
 const PAGE_SIZE = 25;
 
 export default function ProductsPage() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
+  const debouncedSearch = useDebounce(search, 300);
+
+  const { data: prodData, isLoading } = useProducts({
+    page,
+    limit: PAGE_SIZE,
+    name: debouncedSearch.trim() || undefined,
+  });
+  const { data: catData } = useCategories({ page: 1, limit: 25 });
+
+  const products = (prodData?.items ?? []) as Product[];
+  const total = prodData?.meta?.total ?? 0;
+  const categories = ((catData as { items?: Category[] })?.items ?? []) as Category[];
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
-
-  const loadData = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    try {
-      const [prodData, catData] = await Promise.all([
-        getProducts({
-          page,
-          limit: PAGE_SIZE,
-          name: search.trim() || undefined,
-        }),
-        getCategories({ page: 1, limit: 25 }),
-      ]);
-      setProducts((prodData?.items ?? []) as Product[]);
-      setTotal(prodData?.meta?.total ?? 0);
-      setCategories(catData?.items || []);
-    } catch {
-      toast.error("Ошибка загрузки данных");
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, [page, search]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
 
   const openCreate = () => {
     setEditingProduct(null);
@@ -83,24 +62,9 @@ export default function ProductsPage() {
     setDialogOpen(true);
   };
 
-  const handleSaved = useCallback(
-    (updatedProduct?: Product) => {
-      if (updatedProduct) {
-        setProducts((prev) =>
-          prev.some((p) => p.id === updatedProduct.id)
-            ? prev.map((p) =>
-                p.id === updatedProduct.id
-                  ? { ...p, ...updatedProduct, images: updatedProduct.images }
-                  : p
-              )
-            : [...prev, updatedProduct]
-        );
-      } else {
-        loadData(true);
-      }
-    },
-    [loadData]
-  );
+  const handleSaved = () => {
+    invalidateProducts();
+  };
 
   const handleDelete = async () => {
     if (!deleteId) return;
@@ -109,7 +73,7 @@ export default function ProductsPage() {
       await deleteProduct(deleteId);
       toast.success("Товар удалён");
       setDeleteId(null);
-      loadData(true);
+      invalidateProducts();
     } catch {
       toast.error("Ошибка удаления");
     } finally {
@@ -170,7 +134,7 @@ export default function ProductsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? (
+            {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
                   {Array.from({ length: 7 }).map((_, j) => (
@@ -233,6 +197,10 @@ export default function ProductsPage() {
                               src={getImageUrl(img.url)}
                               alt=""
                               className="w-full h-full object-cover"
+                              onError={(e) => {
+                                const wrapper = e.currentTarget.closest("div");
+                                if (wrapper) wrapper.style.display = "none";
+                              }}
                             />
                           </div>
                         ))}

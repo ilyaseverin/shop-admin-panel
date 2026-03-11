@@ -7,12 +7,12 @@ import {
   updateProduct,
   uploadImage,
   getImageUrl,
-  getProduct,
   checkProductSlugExists,
   updateImageType,
   deleteImage,
   getImageDetails,
 } from "@/lib/api";
+import { invalidateProducts } from "@/lib/swr";
 import { generateSlug, generateUniqueSlug } from "@/lib/slug";
 import { useDebounce } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -45,8 +45,6 @@ import { VariantManager } from "./VariantManager";
 
 const CATEGORY_SEARCH_LIMIT = 5;
 const SLUG_CHECK_DELAY_MS = 400;
-const FETCH_PRODUCT_ATTEMPTS = 5;
-const FETCH_PRODUCT_DELAY_MS = 600;
 
 let _keyCounter = 0;
 function nextKey() {
@@ -58,7 +56,7 @@ interface ProductFormDialogProps {
   onOpenChange: (open: boolean) => void;
   product: Product | null;
   categories: Category[];
-  onSaved: (updatedProduct?: Product) => void;
+  onSaved: () => void;
 }
 
 export function ProductFormDialog({
@@ -110,7 +108,6 @@ export function ProductFormDialog({
         categoryId: String(product.categoryId ?? ""),
         sortOrder: String(product.sortOrder ?? ""),
       });
-      // Load images and fetch real imageType from image service
       const images = product.images || [];
       setUploadedImages(images);
       setPendingFiles([]);
@@ -121,17 +118,19 @@ export function ProductFormDialog({
               const details = await getImageDetails(img.url);
               return { url: img.url, type: details.imageType || img.type };
             } catch {
-              return img;
+              return null;
             }
           })
-        ).then((updated) => {
-          // Store original types from image service
+        ).then((results) => {
+          const valid = results.filter(
+            (r): r is ProductImage => r !== null,
+          );
           const map = new Map<string, string>();
-          for (const img of updated) {
+          for (const img of valid) {
             map.set(img.url, img.type);
           }
           originalImageTypesRef.current = map;
-          setUploadedImages(updated);
+          setUploadedImages(valid);
         });
       }
       setSelectedCategoryName(
@@ -230,6 +229,7 @@ export function ProductFormDialog({
     } else {
       try {
         await deleteImage(removed.url);
+        invalidateProducts();
       } catch {
         toast.error("Ошибка удаления изображения");
         return;
@@ -246,24 +246,6 @@ export function ProductFormDialog({
         type: i === index ? "main" : "product",
       }))
     );
-  };
-
-  const fetchProductWithImages = async (
-    newId: number,
-    expectedImages: number
-  ): Promise<Product | undefined> => {
-    for (let attempt = 0; attempt < FETCH_PRODUCT_ATTEMPTS; attempt++) {
-      try {
-        const fullProduct = await getProduct(newId);
-        const images = fullProduct?.images ?? [];
-        if (expectedImages === 0 || images.length >= expectedImages)
-          return { ...fullProduct, id: newId, images } as Product;
-      } catch {
-        // retry
-      }
-      await new Promise((r) => setTimeout(r, FETCH_PRODUCT_DELAY_MS));
-    }
-    return undefined;
   };
 
   // ---- Local variant groups helpers (creation mode) ----
@@ -386,6 +368,7 @@ export function ProductFormDialog({
 
         toast.success("Товар обновлён");
         onOpenChange(false);
+        invalidateProducts();
         onSaved();
       } else {
         // Include local variant groups in creation payload
@@ -434,11 +417,8 @@ export function ProductFormDialog({
         }
         toast.success("Товар создан");
         onOpenChange(false);
-        const fullProduct = await fetchProductWithImages(
-          newId,
-          pendingFiles.length
-        );
-        onSaved(fullProduct);
+        invalidateProducts();
+        onSaved();
       }
     } catch {
       toast.error("Ошибка сохранения");
@@ -701,6 +681,10 @@ export function ProductFormDialog({
                         }
                         alt=""
                         className="w-full h-full object-cover"
+                        onError={(e) => {
+                          const wrapper = e.currentTarget.closest("[class*='relative']");
+                          if (wrapper instanceof HTMLElement) wrapper.style.display = "none";
+                        }}
                       />
                       {img.type === "main" && (
                         <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-amber-500/90 text-white text-[10px] font-medium flex items-center gap-0.5">
