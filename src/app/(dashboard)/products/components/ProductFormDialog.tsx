@@ -236,7 +236,7 @@ export function ProductFormDialog({
     for (const file of Array.from(files)) {
       const blobUrl = URL.createObjectURL(file);
       setPendingFiles((prev) => [...prev, file]);
-      setUploadedImages((prev) => [...prev, { url: blobUrl, type: "product" }]);
+      setUploadedImages((prev) => [...prev, { url: blobUrl, type: "gallery" }]);
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -269,7 +269,7 @@ export function ProductFormDialog({
     setUploadedImages((prev) =>
       prev.map((im, i) => ({
         ...im,
-        type: i === index ? "main" : "product",
+        type: i === index ? "main" : "gallery",
       }))
     );
   };
@@ -371,7 +371,7 @@ export function ProductFormDialog({
               await uploadImage(pendingFiles[i], {
                 entityType: "catalog.product",
                 entityId: String(editingId),
-                imageType: blobImages[i]?.type || "product",
+                imageType: blobImages[i]?.type || "gallery",
               });
             }
           } finally {
@@ -436,7 +436,7 @@ export function ProductFormDialog({
               await uploadImage(pendingFiles[i], {
                 entityType: "catalog.product",
                 entityId: String(newId),
-                imageType: blobImgs[i]?.type || "product",
+                imageType: blobImgs[i]?.type || "gallery",
               });
             }
           } finally {
