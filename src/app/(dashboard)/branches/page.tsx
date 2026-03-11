@@ -214,6 +214,7 @@ export default function BranchesPage() {
                         variant="ghost"
                         size="icon"
                         onClick={() => setDeleteId(branch.id)}
+                        disabled={!(branch.isActive ?? true)}
                         className="h-8 w-8 text-muted-foreground hover:text-destructive"
                       >
                         <Trash2 className="w-3.5 h-3.5" />

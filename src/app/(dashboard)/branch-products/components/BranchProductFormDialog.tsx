@@ -377,7 +377,7 @@ export function BranchProductFormDialog({
                     <button
                       type="button"
                       onClick={clearProduct}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
                       aria-label="Сбросить товар"
                     >
                       ×
@@ -408,7 +408,7 @@ export function BranchProductFormDialog({
                               <li key={p.id}>
                                 <button
                                   type="button"
-                                  className="w-full text-left px-3 py-2 text-sm rounded-sm hover:bg-accent focus:bg-accent focus:outline-none flex justify-between items-center"
+                                  className="w-full text-left px-3 py-2 text-sm rounded-sm hover:bg-accent focus:bg-accent focus:outline-none flex justify-between items-center cursor-pointer"
                                   onClick={() => selectProduct(p)}
                                 >
                                   <span>{p.name}</span>

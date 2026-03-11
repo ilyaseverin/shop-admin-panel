@@ -631,7 +631,7 @@ export function ProductFormDialog({
                             <li key={cat.id}>
                               <button
                                 type="button"
-                                className="w-full text-left px-3 py-2 text-sm rounded-sm hover:bg-accent focus:bg-accent focus:outline-none"
+                                className="w-full text-left px-3 py-2 text-sm rounded-sm hover:bg-accent focus:bg-accent focus:outline-none cursor-pointer"
                                 onClick={() => {
                                   setForm((f) => ({
                                     ...f,
@@ -746,14 +746,14 @@ export function ProductFormDialog({
                           type="button"
                           onClick={() => setMainImage(idx)}
                           title="Сделать главным"
-                          className="w-5 h-5 bg-muted hover:bg-amber-500 rounded-full flex items-center justify-center text-muted-foreground hover:text-white"
+                          className="w-5 h-5 bg-muted hover:bg-amber-500 rounded-full flex items-center justify-center text-muted-foreground hover:text-white cursor-pointer"
                         >
                           <Star className="w-3 h-3" />
                         </button>
                         <button
                           type="button"
                           onClick={() => removeImage(idx)}
-                          className="w-5 h-5 bg-destructive rounded-full flex items-center justify-center text-white"
+                          className="w-5 h-5 bg-destructive rounded-full flex items-center justify-center text-white cursor-pointer"
                         >
                           <X className="w-3 h-3" />
                         </button>
@@ -835,7 +835,7 @@ export function ProductFormDialog({
                       <div className="flex items-center gap-2 px-3 py-2">
                         <button
                           type="button"
-                          className="shrink-0 text-muted-foreground hover:text-foreground"
+                          className="shrink-0 text-muted-foreground hover:text-foreground cursor-pointer"
                           onClick={() => toggleLocalGroup(group._key)}
                         >
                           {isExpanded ? (
