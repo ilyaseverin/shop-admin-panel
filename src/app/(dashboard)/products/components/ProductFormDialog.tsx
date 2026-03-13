@@ -128,6 +128,7 @@ export function ProductFormDialog({
       setForm({
         name: product.name || "",
         fullName: product.fullName || "",
+        sku: product.sku || "",
         slug: product.slug || "",
         description: product.description || "",
         price: String(product.price ?? ""),
@@ -353,6 +354,7 @@ export function ProductFormDialog({
         price: Number(form.price),
         categoryId: Number(form.categoryId),
         fullName: form.fullName || undefined,
+        sku: form.sku || undefined,
         description: form.description || undefined,
         sortOrder: form.sortOrder ? Number(form.sortOrder) : undefined,
       };
@@ -548,6 +550,17 @@ export function ProductFormDialog({
                 setForm((f) => ({ ...f, fullName: e.target.value }))
               }
               placeholder="Смартфон XYZ Pro 256GB"
+              className="bg-muted/50"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Артикул (SKU)</Label>
+            <Input
+              value={form.sku}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, sku: e.target.value }))
+              }
+              placeholder="ABC-12345"
               className="bg-muted/50"
             />
           </div>

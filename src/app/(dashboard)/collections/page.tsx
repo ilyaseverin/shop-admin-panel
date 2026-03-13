@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { deleteProduct, restoreProduct, getImageUrl } from "@/lib/api";
-import { useProducts, useCategories, invalidateProducts } from "@/lib/swr";
+import { deleteCollection, restoreCollection } from "@/lib/api";
+import { useCollections, invalidateCollections } from "@/lib/swr";
 import { useDebounce } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +14,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -34,58 +33,62 @@ import {
   ChevronRight,
   RotateCcw,
 } from "lucide-react";
-import type { Product, Category } from "./types";
-import { ProductFormDialog } from "./components/ProductFormDialog";
+import type { Collection } from "./types";
+import { CollectionFormDialog } from "./components/CollectionFormDialog";
 
 const PAGE_SIZE = 25;
 
-export default function ProductsPage() {
+export default function CollectionsPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [statusFilter, setStatusFilter] = useState<"active" | "deleted" | "all">("active");
+  const [statusFilter, setStatusFilter] = useState<
+    "active" | "deleted" | "all"
+  >("active");
   const debouncedSearch = useDebounce(search, 300);
 
-  const isDeleted = statusFilter === "all" ? undefined : statusFilter === "deleted";
+  const isDeleted =
+    statusFilter === "all" ? undefined : statusFilter === "deleted";
 
-  const { data: prodData, isLoading } = useProducts({
+  const { data, isLoading } = useCollections({
     page,
     limit: PAGE_SIZE,
-    name: debouncedSearch.trim() || undefined,
+    title: debouncedSearch.trim() || undefined,
     isDeleted,
   });
-  const { data: catData } = useCategories({ page: 1, limit: 25 });
 
-  const products = (prodData?.items ?? []) as Product[];
-  const total = prodData?.meta?.total ?? 0;
-  const categories = ((catData as { items?: Category[] })?.items ?? []) as Category[];
+  const collections = (data?.items ?? []) as Collection[];
+  const total = data?.meta?.total ?? 0;
+  const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
 
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [editingCollection, setEditingCollection] = useState<Collection | null>(
+    null,
+  );
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   const openCreate = () => {
-    setEditingProduct(null);
+    setEditingCollection(null);
     setDialogOpen(true);
   };
 
-  const openEdit = (product: Product) => {
-    setEditingProduct(product);
+  const openEdit = (collection: Collection) => {
+    setEditingCollection(collection);
     setDialogOpen(true);
   };
 
   const handleSaved = () => {
-    invalidateProducts();
+    invalidateCollections();
   };
 
   const handleDelete = async () => {
     if (!deleteId) return;
     setDeleting(true);
     try {
-      await deleteProduct(deleteId);
-      toast.success("Товар удалён");
+      await deleteCollection(deleteId);
+      toast.success("Коллекция удалена");
       setDeleteId(null);
-      invalidateProducts();
+      invalidateCollections();
     } catch {
       toast.error("Ошибка удаления");
     } finally {
@@ -93,24 +96,18 @@ export default function ProductsPage() {
     }
   };
 
-  const getCategoryName = (id: number) => {
-    return categories.find((c) => c.id === id)?.name || `#${id}`;
-  };
-
-  const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">Товары</h2>
+          <h2 className="text-2xl font-bold tracking-tight">Коллекции</h2>
           <p className="text-muted-foreground text-sm mt-1">
-            Управление товарами магазина
+            Управление коллекциями товаров
           </p>
         </div>
         <Button
           onClick={openCreate}
-          className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 shadow-lg shadow-emerald-500/25"
+          className="bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-400 hover:to-purple-500 shadow-lg shadow-violet-500/25"
         >
           <Plus className="w-4 h-4 mr-2" />
           Добавить
@@ -121,7 +118,7 @@ export default function ProductsPage() {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="Поиск по имени..."
+            placeholder="Поиск по названию..."
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
@@ -157,11 +154,8 @@ export default function ProductsPage() {
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-16">ID</TableHead>
               <TableHead>Название</TableHead>
-              <TableHead>Slug</TableHead>
-              <TableHead>SKU</TableHead>
-              <TableHead className="w-24">Цена</TableHead>
-              <TableHead>Категория</TableHead>
-              <TableHead className="w-16">Фото</TableHead>
+              <TableHead>Описание</TableHead>
+              <TableHead className="w-24">Товаров</TableHead>
               <TableHead className="w-24 text-right">Действия</TableHead>
             </TableRow>
           </TableHeader>
@@ -169,97 +163,51 @@ export default function ProductsPage() {
             {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 8 }).map((_, j) => (
+                  {Array.from({ length: 5 }).map((_, j) => (
                     <TableCell key={j}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
                   ))}
                 </TableRow>
               ))
-            ) : products.length === 0 ? (
+            ) : collections.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={5}
                   className="text-center text-muted-foreground py-12"
                 >
-                  Товары не найдены
+                  Коллекции не найдены
                 </TableCell>
               </TableRow>
             ) : (
-              products.map((product) => (
-                <TableRow key={product.id} className="group">
+              collections.map((col) => (
+                <TableRow key={col.id} className="group">
                   <TableCell className="font-mono text-xs text-muted-foreground">
-                    {product.id}
+                    {col.id}
                   </TableCell>
                   <TableCell
                     className="font-medium max-w-[200px] truncate"
-                    title={product.name}
+                    title={col.title}
                   >
-                    {product.name}
+                    {col.title}
                   </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant="secondary"
-                      className="font-mono text-xs max-w-[150px] truncate block"
-                      title={product.slug}
-                    >
-                      {product.slug}
-                    </Badge>
+                  <TableCell className="text-muted-foreground text-sm max-w-[250px] truncate">
+                    {col.description || "—"}
                   </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    {product.sku || "—"}
-                  </TableCell>
-                  <TableCell className="font-semibold">
-                    {product.price?.toLocaleString("ru-RU")} ₽
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant="outline"
-                      className="text-xs border-indigo-500/30 text-indigo-400"
-                    >
-                      {getCategoryName(product.categoryId)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {product.images?.length > 0 ? (
-                      <div className="flex -space-x-1">
-                        {product.images.slice(0, 3).map((img, i) => (
-                          <div
-                            key={i}
-                            className="w-7 h-7 rounded-md bg-muted border-2 border-card overflow-hidden"
-                          >
-                            <img
-                              src={getImageUrl(img.url)}
-                              alt=""
-                              className="w-full h-full object-cover"
-                              onError={(e) => {
-                                const wrapper = e.currentTarget.closest("div");
-                                if (wrapper) wrapper.style.display = "none";
-                              }}
-                            />
-                          </div>
-                        ))}
-                        {product.images.length > 3 && (
-                          <div className="w-7 h-7 rounded-md bg-muted border-2 border-card flex items-center justify-center text-[10px] text-muted-foreground">
-                            +{product.images.length - 3}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground text-xs">—</span>
-                    )}
+                  <TableCell className="text-muted-foreground">
+                    {col.products?.length ?? col.productIds?.length ?? 0}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {product.deletedAt && (
+                      {col.deletedAt && (
                         <Button
                           variant="ghost"
                           size="icon"
                           onClick={async () => {
                             try {
-                              await restoreProduct(product.id);
-                              toast.success("Товар восстановлен");
-                              invalidateProducts();
+                              await restoreCollection(col.id);
+                              toast.success("Коллекция восстановлена");
+                              invalidateCollections();
                             } catch {
                               toast.error("Ошибка восстановления");
                             }
@@ -273,7 +221,7 @@ export default function ProductsPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => openEdit(product)}
+                        onClick={() => openEdit(col)}
                         className="h-8 w-8 text-muted-foreground hover:text-foreground"
                       >
                         <Pencil className="w-3.5 h-3.5" />
@@ -281,7 +229,7 @@ export default function ProductsPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => setDeleteId(product.id)}
+                        onClick={() => setDeleteId(col.id)}
                         className="h-8 w-8 text-muted-foreground hover:text-destructive"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -324,11 +272,10 @@ export default function ProductsPage() {
         </div>
       )}
 
-      <ProductFormDialog
+      <CollectionFormDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        product={editingProduct}
-        categories={categories}
+        collection={editingCollection}
         onSaved={handleSaved}
       />
 
@@ -337,8 +284,8 @@ export default function ProductsPage() {
         onOpenChange={(open) => !open && setDeleteId(null)}
         onConfirm={handleDelete}
         loading={deleting}
-        title="Удалить товар?"
-        description="Товар будет удалён навсегда. Это действие нельзя отменить."
+        title="Удалить коллекцию?"
+        description="Коллекция будет удалена. Это действие можно отменить."
       />
     </div>
   );

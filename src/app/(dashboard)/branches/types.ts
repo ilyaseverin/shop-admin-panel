@@ -6,6 +6,11 @@ export interface Branch {
   city?: string;
   region?: string;
   phone?: string;
+  email?: string;
+  workingHours?: string;
+  latitude?: number;
+  longitude?: number;
+  bannerImage?: string;
   isActive?: boolean;
 }
 
@@ -16,6 +21,10 @@ export interface BranchForm {
   city: string;
   region: string;
   phone: string;
+  email: string;
+  workingHours: string;
+  latitude: string;
+  longitude: string;
   isActive: boolean;
 }
 
@@ -26,5 +35,9 @@ export const emptyBranchForm: BranchForm = {
   city: "",
   region: "",
   phone: "",
+  email: "",
+  workingHours: "",
+  latitude: "",
+  longitude: "",
   isActive: true,
 };

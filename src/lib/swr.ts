@@ -6,15 +6,17 @@ import {
   getCategories,
   getBranches,
   getBranchProducts,
+  getCollections,
 } from "./api";
 
 export function useProducts(params: {
   page: number;
   limit: number;
   name?: string;
+  isDeleted?: boolean;
 }) {
   return useSWR(
-    ["products", params.page, params.limit, params.name] as const,
+    ["products", params.page, params.limit, params.name, params.isDeleted] as const,
     () => getProducts(params),
   );
 }
@@ -23,9 +25,10 @@ export function useCategories(params: {
   page?: number;
   limit?: number;
   name?: string;
+  isDeleted?: boolean;
 }) {
   return useSWR(
-    ["categories", params.page, params.limit, params.name] as const,
+    ["categories", params.page, params.limit, params.name, params.isDeleted] as const,
     () => getCategories(params),
   );
 }
@@ -59,6 +62,18 @@ export function useBranchProducts(params: {
   );
 }
 
+export function useCollections(params: {
+  page?: number;
+  limit?: number;
+  title?: string;
+  isDeleted?: boolean;
+}) {
+  return useSWR(
+    ["collections", params.page, params.limit, params.title, params.isDeleted] as const,
+    () => getCollections(params),
+  );
+}
+
 export function invalidateProducts() {
   globalMutate(
     (key) => Array.isArray(key) && key[0] === "products",
@@ -86,6 +101,14 @@ export function invalidateBranches() {
 export function invalidateBranchProducts() {
   globalMutate(
     (key) => Array.isArray(key) && key[0] === "branch-products",
+    undefined,
+    { revalidate: true },
+  );
+}
+
+export function invalidateCollections() {
+  globalMutate(
+    (key) => Array.isArray(key) && key[0] === "collections",
     undefined,
     { revalidate: true },
   );

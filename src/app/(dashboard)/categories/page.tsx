@@ -1,11 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { deleteCategory, getCategories } from "@/lib/api";
+import { deleteCategory, restoreCategory, getCategories } from "@/lib/api";
 import { useCategories, invalidateCategories } from "@/lib/swr";
 import { useDebounce } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -25,6 +32,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Search,
+  RotateCcw,
 } from "lucide-react";
 import type { Category } from "./types";
 import { CategoryFormDialog } from "./components/CategoryFormDialog";
@@ -33,12 +41,15 @@ export default function CategoriesPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
+  const [statusFilter, setStatusFilter] = useState<"active" | "deleted" | "all">("active");
+  const isDeleted = statusFilter === "all" ? undefined : statusFilter === "deleted";
   const limit = 10;
 
   const { data: listData, isLoading } = useCategories({
     page,
     limit,
     name: debouncedSearch.trim() || undefined,
+    isDeleted,
   });
 
   const categories = ((listData as { items?: Category[] })?.items ?? []) as Category[];
@@ -115,6 +126,25 @@ export default function CategoriesPage() {
             className="pl-9 bg-muted/50"
           />
         </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Статус:</span>
+          <Select
+            value={statusFilter}
+            onValueChange={(v: "active" | "deleted" | "all") => {
+              setStatusFilter(v);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-[180px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Активные</SelectItem>
+              <SelectItem value="deleted">Удалённые</SelectItem>
+              <SelectItem value="all">Все</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="rounded-xl border border-border/50 bg-card/50 backdrop-blur-sm overflow-x-auto">
@@ -171,6 +201,25 @@ export default function CategoriesPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {cat.deletedAt && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={async () => {
+                            try {
+                              await restoreCategory(cat.id);
+                              toast.success("Категория восстановлена");
+                              invalidateCategories();
+                            } catch {
+                              toast.error("Ошибка восстановления");
+                            }
+                          }}
+                          className="h-8 w-8 text-muted-foreground hover:text-emerald-500"
+                          title="Восстановить"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon"

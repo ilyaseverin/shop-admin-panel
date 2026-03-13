@@ -76,11 +76,13 @@ export async function getCategories(params?: {
   page?: number;
   limit?: number;
   name?: string;
+  isDeleted?: boolean;
 }) {
   const query = new URLSearchParams();
   if (params?.page) query.set("page", String(params.page));
   if (params?.limit) query.set("limit", String(params.limit));
   if (params?.name) query.set("name", params.name);
+  if (params?.isDeleted !== undefined) query.set("isDeleted", String(params.isDeleted));
 
   const res = await fetchWithAuth(
     `${CATALOG_PROXY}/api/admin/categories?${query.toString()}`,
@@ -137,6 +139,15 @@ export async function deleteCategory(id: number) {
   if (!res.ok) throw new Error("Ошибка удаления категории");
 }
 
+export async function restoreCategory(id: number) {
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/categories/${id}/restore`,
+    { method: "PATCH" },
+  );
+  if (!res.ok) throw new Error("Ошибка восстановления категории");
+  return res.json();
+}
+
 /** Проверка, занят ли слаг другой категорией (при excludeId — кроме этой). */
 export async function checkCategorySlugExists(
   slug: string,
@@ -156,13 +167,14 @@ export async function checkCategorySlugExists(
 export async function getProducts(params?: {
   page?: number;
   limit?: number;
-  /** Поиск по названию (частичное совпадение). Регистронезависимость — на стороне бэкенда. */
   name?: string;
+  isDeleted?: boolean;
 }) {
   const query = new URLSearchParams();
   if (params?.page != null) query.set("page", String(params.page));
   if (params?.limit != null) query.set("limit", String(params.limit));
   if (params?.name?.trim()) query.set("name", params.name.trim());
+  if (params?.isDeleted !== undefined) query.set("isDeleted", String(params.isDeleted));
   const qs = query.toString();
   const url = `${CATALOG_PROXY}/api/admin/products${qs ? `?${qs}` : ""}`;
   const res = await fetchWithAuth(url);
@@ -185,6 +197,7 @@ export async function createProduct(data: {
   price: number;
   categoryId: number;
   fullName?: string;
+  sku?: string;
   description?: string;
   sortOrder?: number;
   variantGroups?: {
@@ -216,6 +229,7 @@ export async function updateProduct(
     price?: number;
     categoryId?: number;
     fullName?: string;
+    sku?: string;
     description?: string;
     sortOrder?: number;
   },
@@ -233,6 +247,15 @@ export async function deleteProduct(id: number) {
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Ошибка удаления товара");
+}
+
+export async function restoreProduct(id: number) {
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/products/${id}/restore`,
+    { method: "PATCH" },
+  );
+  if (!res.ok) throw new Error("Ошибка восстановления товара");
+  return res.json();
 }
 
 /** Проверка, занят ли слаг другим товаром (при excludeId — кроме этого). */
@@ -286,6 +309,11 @@ export async function createBranch(data: {
   city?: string;
   region?: string;
   phone?: string;
+  email?: string;
+  workingHours?: string;
+  latitude?: number;
+  longitude?: number;
+  bannerImage?: string;
   isActive?: boolean;
 }) {
   const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/branches`, {
@@ -305,6 +333,11 @@ export async function updateBranch(
     city?: string;
     region?: string;
     phone?: string;
+    email?: string;
+    workingHours?: string;
+    latitude?: number;
+    longitude?: number;
+    bannerImage?: string;
     isActive?: boolean;
   },
 ) {
@@ -597,6 +630,79 @@ export async function restoreVariantOption(
     { method: "PATCH" },
   );
   if (!res.ok) throw new Error("Ошибка восстановления опции варианта");
+  return res.json();
+}
+
+// ---- Collections API ----
+export async function getCollections(params?: {
+  page?: number;
+  limit?: number;
+  title?: string;
+  isDeleted?: boolean;
+}) {
+  const query = new URLSearchParams();
+  if (params?.page != null) query.set("page", String(params.page));
+  if (params?.limit != null) query.set("limit", String(params.limit));
+  if (params?.title?.trim()) query.set("title", params.title.trim());
+  if (params?.isDeleted !== undefined) query.set("isDeleted", String(params.isDeleted));
+  const qs = query.toString();
+  const url = `${CATALOG_PROXY}/api/admin/collections${qs ? `?${qs}` : ""}`;
+  const res = await fetchWithAuth(url);
+  if (!res.ok) throw new Error("Ошибка загрузки коллекций");
+  const data = await res.json();
+  const items = Array.isArray(data) ? data : (data?.items ?? []);
+  const meta = (data as { meta?: { total?: number } })?.meta;
+  return { items, meta };
+}
+
+export async function getCollection(id: number) {
+  const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/collections/${id}`);
+  if (!res.ok) throw new Error("Ошибка загрузки коллекции");
+  return res.json();
+}
+
+export async function createCollection(data: {
+  title: string;
+  description?: string;
+  productIds?: number[];
+}) {
+  const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/collections`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Ошибка создания коллекции");
+  return res.json();
+}
+
+export async function updateCollection(
+  id: number,
+  data: {
+    title?: string;
+    description?: string;
+    productIds?: number[];
+  },
+) {
+  const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/collections/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Ошибка обновления коллекции");
+  return res.json();
+}
+
+export async function deleteCollection(id: number) {
+  const res = await fetchWithAuth(`${CATALOG_PROXY}/api/admin/collections/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Ошибка удаления коллекции");
+}
+
+export async function restoreCollection(id: number) {
+  const res = await fetchWithAuth(
+    `${CATALOG_PROXY}/api/admin/collections/${id}/restore`,
+    { method: "PATCH" },
+  );
+  if (!res.ok) throw new Error("Ошибка восстановления коллекции");
   return res.json();
 }
 

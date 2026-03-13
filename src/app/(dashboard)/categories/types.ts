@@ -6,6 +6,7 @@ export interface Category {
   description: string;
   parentId: number;
   images: { url: string; type: string }[];
+  deletedAt?: string;
 }
 
 export interface CategoryForm {

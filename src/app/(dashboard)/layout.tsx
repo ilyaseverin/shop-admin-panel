@@ -30,6 +30,7 @@ import {
   LogOut,
   Store,
   PackageCheck,
+  Library,
 } from "lucide-react";
 
 const navItems = [
@@ -38,6 +39,7 @@ const navItems = [
   { title: "Товары", href: "/products", icon: Package },
   { title: "Товары в филиалах", href: "/branch-products", icon: PackageCheck },
   { title: "Филиалы", href: "/branches", icon: Building2 },
+  { title: "Коллекции", href: "/collections", icon: Library },
 ];
 
 export default function DashboardLayout({

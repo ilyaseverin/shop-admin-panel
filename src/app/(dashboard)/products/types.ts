@@ -8,11 +8,13 @@ export interface Product {
   name: string;
   fullName?: string;
   slug: string;
+  sku?: string;
   description?: string;
   price: number;
   categoryId: number;
   sortOrder: number;
   images: ProductImage[];
+  deletedAt?: string;
 }
 
 export interface Category {
@@ -25,6 +27,7 @@ export interface ProductForm {
   name: string;
   fullName: string;
   slug: string;
+  sku: string;
   description: string;
   price: string;
   categoryId: string;
@@ -35,6 +38,7 @@ export const emptyProductForm: ProductForm = {
   name: "",
   fullName: "",
   slug: "",
+  sku: "",
   description: "",
   price: "",
   categoryId: "",

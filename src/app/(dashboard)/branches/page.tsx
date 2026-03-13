@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { deleteBranch, restoreBranch } from "@/lib/api";
+import { deleteBranch, restoreBranch, getImageUrl } from "@/lib/api";
 import { useBranches, invalidateBranches } from "@/lib/swr";
 import { Button } from "@/components/ui/button";
 import {
@@ -144,6 +144,7 @@ export default function BranchesPage() {
               <TableHead>Адрес</TableHead>
               <TableHead>Город</TableHead>
               <TableHead>Телефон</TableHead>
+              <TableHead className="w-16">Баннер</TableHead>
               <TableHead className="w-20">Статус</TableHead>
               <TableHead className="w-24 text-right">Действия</TableHead>
             </TableRow>
@@ -152,7 +153,7 @@ export default function BranchesPage() {
             {isLoading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 7 }).map((_, j) => (
+                  {Array.from({ length: 8 }).map((_, j) => (
                     <TableCell key={j}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
@@ -162,7 +163,7 @@ export default function BranchesPage() {
             ) : branches.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={8}
                   className="text-center text-muted-foreground py-12"
                 >
                   Филиалы не найдены
@@ -191,6 +192,23 @@ export default function BranchesPage() {
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
                     {branch.phone || "—"}
+                  </TableCell>
+                  <TableCell>
+                    {branch.bannerImage ? (
+                      <div className="w-7 h-7 rounded-md bg-muted border-2 border-card overflow-hidden">
+                        <img
+                          src={getImageUrl(branch.bannerImage)}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            const wrapper = e.currentTarget.closest("div");
+                            if (wrapper) wrapper.style.display = "none";
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">—</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Switch
