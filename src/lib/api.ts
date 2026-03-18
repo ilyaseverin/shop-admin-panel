@@ -706,31 +706,30 @@ export async function restoreCollection(id: number) {
   return res.json();
 }
 
-// ---- Image API ----
-// image_service: POST /images/upload — multipart/form-data: file, entityType, entityId, imageType? (UploadImageDto).
+// ---- Image API (topic-based) ----
 export async function uploadImage(
   file: File,
-  options: { entityType: string; entityId: string; imageType?: string },
+  options: {
+    topic: string;
+    entityType: string;
+    entityId: string;
+    imageType?: string;
+    title?: string;
+    description?: string;
+  },
 ) {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("entityType", options.entityType);
   formData.append("entityId", options.entityId);
-  if (options.imageType != null && options.imageType !== "") {
-    formData.append("imageType", options.imageType);
-  }
+  if (options.imageType) formData.append("imageType", options.imageType);
+  if (options.title) formData.append("title", options.title);
+  if (options.description) formData.append("description", options.description);
 
-  const tokens = getTokens();
-  const headers: Record<string, string> = {};
-  if (tokens?.accessToken) {
-    headers["Authorization"] = `Bearer ${tokens.accessToken}`;
-  }
-
-  const res = await fetch(`${IMAGE_PROXY}/api/images/upload`, {
-    method: "POST",
-    headers,
-    body: formData,
-  });
+  const res = await fetchWithAuth(
+    `${IMAGE_PROXY}/api/admin/images/${options.topic}`,
+    { method: "POST", body: formData },
+  );
   if (!res.ok) throw new Error("Ошибка загрузки изображения");
   return res.json();
 }
@@ -739,13 +738,17 @@ export function getImageUrl(externalId: string) {
   return `${IMAGE_PROXY}/api/images/${externalId}`;
 }
 
-export async function updateImageType(externalId: string, imageType: string) {
-  const res = await fetchWithAuth(`${IMAGE_PROXY}/api/images/${externalId}`, {
-    method: "PATCH",
-    body: JSON.stringify({ imageType }),
-  });
+export async function updateImage(
+  topic: string,
+  externalId: string,
+  data: { imageType?: string; title?: string; description?: string },
+) {
+  const res = await fetchWithAuth(
+    `${IMAGE_PROXY}/api/admin/images/${topic}/${externalId}`,
+    { method: "PATCH", body: JSON.stringify(data) },
+  );
   if (!res.ok) {
-    throw new Error(`Ошибка обновления типа изображения (${res.status})`);
+    throw new Error(`Ошибка обновления изображения (${res.status})`);
   }
   const text = await res.text().catch(() => "");
   try {
@@ -755,10 +758,11 @@ export async function updateImageType(externalId: string, imageType: string) {
   }
 }
 
-export async function deleteImage(externalId: string) {
-  const res = await fetchWithAuth(`${IMAGE_PROXY}/api/images/${externalId}`, {
-    method: "DELETE",
-  });
+export async function deleteImage(topic: string, externalId: string) {
+  const res = await fetchWithAuth(
+    `${IMAGE_PROXY}/api/admin/images/${topic}/${externalId}`,
+    { method: "DELETE" },
+  );
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     console.error(
@@ -772,10 +776,39 @@ export async function deleteImage(externalId: string) {
   }
 }
 
-export async function getImageDetails(externalId: string) {
+export async function getImageDetails(topic: string, externalId: string) {
   const res = await fetchWithAuth(
-    `${IMAGE_PROXY}/api/admin/images/${externalId}`,
+    `${IMAGE_PROXY}/api/admin/images/${topic}/${externalId}`,
   );
   if (!res.ok) throw new Error("Ошибка загрузки данных изображения");
   return res.json();
+}
+
+// ---- Branch banner image API ----
+export async function uploadBranchBanner(
+  file: File,
+  options: { entityType: string; entityId: string; imageType?: string },
+) {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("entityType", options.entityType);
+  formData.append("entityId", options.entityId);
+  if (options.imageType) formData.append("imageType", options.imageType);
+
+  const res = await fetchWithAuth(
+    `${IMAGE_PROXY}/api/admin/images/branch.banner`,
+    { method: "POST", body: formData },
+  );
+  if (!res.ok) throw new Error("Ошибка загрузки изображения");
+  return res.json();
+}
+
+export async function deleteBranchBanner(externalId: string) {
+  const res = await fetchWithAuth(
+    `${IMAGE_PROXY}/api/admin/images/branch.banner/${externalId}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) {
+    throw new Error(`Ошибка удаления изображения (${res.status})`);
+  }
 }

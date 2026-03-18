@@ -1,7 +1,16 @@
 export interface ProductImage {
   url: string;
   type: string;
+  title?: string;
+  description?: string;
 }
+
+export const PRODUCT_IMAGE_TYPES = [
+  { value: "main", label: "Главная" },
+  { value: "hover", label: "Второе изображение" },
+  { value: "main_banner", label: "Баннер на главной" },
+  { value: "banner_gallery", label: "Баннер галерея" },
+] as const;
 
 export interface Product {
   id: number;

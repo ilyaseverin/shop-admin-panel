@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { createBranch, updateBranch, getBranch, uploadImage, deleteImage, getImageUrl } from "@/lib/api";
-import { invalidateBranches } from "@/lib/swr";
+import { createBranch, updateBranch, getBranch, uploadBranchBanner, deleteBranchBanner, getImageUrl } from "@/lib/api";
 import { Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,6 +49,8 @@ export function BranchFormDialog({
   const [pendingBannerFile, setPendingBannerFile] = useState<File | null>(null);
   const [bannerPreviewUrl, setBannerPreviewUrl] = useState<string | null>(null);
   const [uploadingBanner, setUploadingBanner] = useState(false);
+  // Original banner externalId queued for deletion on save
+  const [pendingBannerDelete, setPendingBannerDelete] = useState<string | null>(null);
   const bannerInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -62,6 +63,7 @@ export function BranchFormDialog({
       setBannerPreviewUrl(null);
     }
     setPendingBannerFile(null);
+    setPendingBannerDelete(null);
     if (branch) {
       setForm({
         name: branch.name || "",
@@ -128,11 +130,19 @@ export function BranchFormDialog({
       };
       if (editingId) {
         await updateBranch(editingId, payload);
+
+        // Delete banner if queued
+        if (pendingBannerDelete) {
+          await deleteBranchBanner(pendingBannerDelete);
+          await updateBranch(editingId, { bannerImage: "" });
+          setPendingBannerDelete(null);
+        }
+
         // Upload banner if pending, then save externalId to branch
         if (pendingBannerFile) {
           setUploadingBanner(true);
           try {
-            const imgResult = await uploadImage(pendingBannerFile, {
+            const imgResult = await uploadBranchBanner(pendingBannerFile, {
               entityType: "branch",
               entityId: String(editingId),
               imageType: "banner",
@@ -152,7 +162,7 @@ export function BranchFormDialog({
         if (newId && pendingBannerFile) {
           setUploadingBanner(true);
           try {
-            const imgResult = await uploadImage(pendingBannerFile, {
+            const imgResult = await uploadBranchBanner(pendingBannerFile, {
               entityType: "branch",
               entityId: String(newId),
               imageType: "banner",
@@ -311,19 +321,10 @@ export function BranchFormDialog({
                   />
                   <button
                     type="button"
-                    onClick={async () => {
+                    onClick={() => {
+                      // Queue server banner for deletion on save
                       if (bannerImage && !pendingBannerFile) {
-                        try {
-                          await deleteImage(bannerImage);
-                          // Clear bannerImage field on the backend
-                          if (editingId) {
-                            await updateBranch(editingId, { bannerImage: "" });
-                          }
-                          invalidateBranches();
-                        } catch {
-                          toast.error("Ошибка удаления баннера");
-                          return;
-                        }
+                        setPendingBannerDelete(bannerImage);
                       }
                       if (bannerPreviewUrl) {
                         URL.revokeObjectURL(bannerPreviewUrl);
