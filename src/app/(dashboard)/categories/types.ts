@@ -1,3 +1,15 @@
+export interface CategoryImage {
+  url: string;
+  type: string;
+  title?: string;
+  description?: string;
+}
+
+export const CATEGORY_IMAGE_TYPES = [
+  { value: "main", label: "Главная" },
+  { value: "background", label: "Фоновое изображение на странице" },
+] as const;
+
 export interface Category {
   id: number;
   name: string;
@@ -5,7 +17,7 @@ export interface Category {
   slug: string;
   description: string;
   parentId: number;
-  images: { url: string; type: string }[];
+  images: CategoryImage[];
   deletedAt?: string;
 }
 

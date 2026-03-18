@@ -8,7 +8,7 @@ import {
   uploadImage,
   getImageUrl,
   checkProductSlugExists,
-  updateImageType,
+  updateImage,
   deleteImage,
   getImageDetails,
 } from "@/lib/api";
@@ -29,9 +29,15 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Upload,
   X,
-  Star,
   Search,
   RefreshCw,
   Plus,
@@ -40,7 +46,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import type { Product, ProductImage, Category, ProductForm, LocalVariantGroup, LocalVariantOption } from "../types";
-import { emptyProductForm } from "../types";
+import { emptyProductForm, PRODUCT_IMAGE_TYPES } from "../types";
 import { VariantManager, type VariantManagerHandle } from "./VariantManager";
 
 const CATEGORY_SEARCH_LIMIT = 5;
@@ -91,8 +97,10 @@ export function ProductFormDialog({
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Original image types from server (to detect changes on save)
-  const originalImageTypesRef = useRef<Map<string, string>>(new Map());
+  // Original image data from server (to detect changes on save)
+  const originalImageDataRef = useRef<Map<string, { type: string; title: string; description: string }>>(new Map());
+  // Server images queued for deletion (applied on save only)
+  const pendingDeletesRef = useRef<string[]>([]);
   const variantManagerRef = useRef<VariantManagerHandle>(null);
 
   const [categorySearch, setCategorySearch] = useState("");
@@ -123,7 +131,8 @@ export function ProductFormDialog({
     if (!open) return;
     setFieldErrors({});
     setSubmitted(false);
-    originalImageTypesRef.current = new Map();
+    originalImageDataRef.current = new Map();
+    pendingDeletesRef.current = [];
     if (product) {
       setForm({
         name: product.name || "",
@@ -142,21 +151,26 @@ export function ProductFormDialog({
         Promise.all(
           images.map(async (img) => {
             try {
-              const details = await getImageDetails(img.url);
-              return { url: img.url, type: details.imageType || img.type };
+              const details = await getImageDetails("catalog.product.image", img.url);
+              return {
+                url: img.url,
+                type: details.imageType || img.type,
+                title: details.title || "",
+                description: details.description || "",
+              };
             } catch {
               return null;
             }
           })
         ).then((results) => {
           const valid = results.filter(
-            (r): r is ProductImage => r !== null,
-          );
-          const map = new Map<string, string>();
+            (r): r is NonNullable<typeof r> => r !== null,
+          ) as ProductImage[];
+          const map = new Map<string, { type: string; title: string; description: string }>();
           for (const img of valid) {
-            map.set(img.url, img.type);
+            map.set(img.url, { type: img.type, title: img.title || "", description: img.description || "" });
           }
-          originalImageTypesRef.current = map;
+          originalImageDataRef.current = map;
           setUploadedImages(valid);
         });
       }
@@ -237,42 +251,47 @@ export function ProductFormDialog({
     for (const file of Array.from(files)) {
       const blobUrl = URL.createObjectURL(file);
       setPendingFiles((prev) => [...prev, file]);
-      setUploadedImages((prev) => [...prev, { url: blobUrl, type: "gallery" }]);
+      setUploadedImages((prev) => {
+        const hasMain = prev.some((img) => img.type === "main");
+        return [...prev, { url: blobUrl, type: hasMain ? "banner_gallery" : "main", title: "", description: "" }];
+      });
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const removeImage = async (index: number) => {
+  const removeImage = (index: number) => {
     const removed = uploadedImages[index];
     if (!removed) return;
-    const isBlob = removed.url.startsWith("blob:");
 
-    if (isBlob) {
+    if (removed.url.startsWith("blob:")) {
       URL.revokeObjectURL(removed.url);
       const blobIndex = uploadedImages
         .slice(0, index)
         .filter((img) => img.url.startsWith("blob:")).length;
       setPendingFiles((p) => p.filter((_, i) => i !== blobIndex));
     } else {
-      try {
-        await deleteImage(removed.url);
-        invalidateProducts();
-      } catch {
-        toast.error("Ошибка удаления изображения");
-        return;
-      }
+      // Queue server image for deletion on save
+      pendingDeletesRef.current.push(removed.url);
     }
     setUploadedImages((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Only updates local state — API call happens on save
-  const setMainImage = (index: number) => {
-    setUploadedImages((prev) =>
-      prev.map((im, i) => ({
-        ...im,
-        type: i === index ? "main" : "gallery",
-      }))
-    );
+  // Types that can only be assigned to one image at a time
+  const UNIQUE_IMAGE_TYPES = new Set(["main", "hover", "main_banner"]);
+
+  const updateImageField = (index: number, patch: Partial<ProductImage>) => {
+    setUploadedImages((prev) => {
+      const next = [...prev];
+      // If selecting a unique type already taken by another image — swap types
+      if (patch.type && UNIQUE_IMAGE_TYPES.has(patch.type)) {
+        const prevOwner = next.findIndex((im, i) => i !== index && im.type === patch.type);
+        if (prevOwner !== -1) {
+          next[prevOwner] = { ...next[prevOwner], type: next[index].type };
+        }
+      }
+      next[index] = { ...next[index], ...patch };
+      return next;
+    });
   };
 
   // ---- Local variant groups helpers (creation mode) ----
@@ -362,6 +381,12 @@ export function ProductFormDialog({
       if (editingId) {
         await updateProduct(editingId, payload);
 
+        // Delete queued images
+        for (const externalId of pendingDeletesRef.current) {
+          await deleteImage("catalog.product.image", externalId);
+        }
+        pendingDeletesRef.current = [];
+
         // Upload new images
         const blobImages = uploadedImages.filter((img) =>
           img.url.startsWith("blob:")
@@ -370,10 +395,14 @@ export function ProductFormDialog({
           setUploading(true);
           try {
             for (let i = 0; i < pendingFiles.length; i++) {
+              const blobImg = blobImages[i];
               await uploadImage(pendingFiles[i], {
+                topic: "catalog.product.image",
                 entityType: "catalog.product",
                 entityId: String(editingId),
-                imageType: blobImages[i]?.type || "gallery",
+                imageType: blobImg?.type || "main",
+                title: blobImg?.title || undefined,
+                description: blobImg?.description || undefined,
               });
             }
           } finally {
@@ -381,13 +410,17 @@ export function ProductFormDialog({
           }
         }
 
-        // Update image types that changed (server images only)
-        const origTypes = originalImageTypesRef.current;
+        // Update changed image data (server images only)
+        const origData = originalImageDataRef.current;
         for (const img of uploadedImages) {
           if (img.url.startsWith("blob:")) continue;
-          const origType = origTypes.get(img.url);
-          if (origType && origType !== img.type) {
-            await updateImageType(img.url, img.type);
+          const orig = origData.get(img.url);
+          if (orig && (orig.type !== img.type || orig.title !== (img.title || "") || orig.description !== (img.description || ""))) {
+            await updateImage("catalog.product.image", img.url, {
+              imageType: img.type,
+              title: img.title || undefined,
+              description: img.description || undefined,
+            });
           }
         }
 
@@ -400,6 +433,8 @@ export function ProductFormDialog({
         onOpenChange(false);
         invalidateProducts();
         onSaved();
+        // Delayed re-invalidation for Kafka image propagation
+        setTimeout(() => invalidateProducts(), 2000);
       } else {
         // Include local variant groups in creation payload
         const filledGroups = localGroups.filter((g) => g.name.trim());
@@ -435,10 +470,14 @@ export function ProductFormDialog({
               img.url.startsWith("blob:")
             );
             for (let i = 0; i < pendingFiles.length; i++) {
+              const blobImg = blobImgs[i];
               await uploadImage(pendingFiles[i], {
+                topic: "catalog.product.image",
                 entityType: "catalog.product",
                 entityId: String(newId),
-                imageType: blobImgs[i]?.type || "gallery",
+                imageType: blobImg?.type || "main",
+                title: blobImg?.title || undefined,
+                description: blobImg?.description || undefined,
               });
             }
           } finally {
@@ -449,6 +488,8 @@ export function ProductFormDialog({
         onOpenChange(false);
         invalidateProducts();
         onSaved();
+        // Delayed re-invalidation for Kafka image propagation
+        setTimeout(() => invalidateProducts(), 2000);
       }
     } catch {
       toast.error("Ошибка сохранения");
@@ -735,47 +776,62 @@ export function ProductFormDialog({
             <Label className="text-sm font-medium">Изображения</Label>
             <div className="border border-dashed border-border/70 rounded-xl p-4 space-y-3">
               {uploadedImages.length > 0 && (
-                <div className="flex flex-wrap gap-3">
+                <div className="flex flex-wrap gap-4">
                   {uploadedImages.map((img, idx) => (
                     <div
                       key={idx}
-                      className="relative w-20 h-20 rounded-lg bg-muted overflow-hidden group/img border border-border"
+                      className="w-48 rounded-lg border border-border bg-card/80 overflow-hidden"
                     >
-                      <img
-                        src={
-                          img.url.startsWith("blob:")
-                            ? img.url
-                            : getImageUrl(img.url)
-                        }
-                        alt=""
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          const wrapper = e.currentTarget.closest("[class*='relative']");
-                          if (wrapper instanceof HTMLElement) wrapper.style.display = "none";
-                        }}
-                      />
-                      {img.type === "main" && (
-                        <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-amber-500/90 text-white text-[10px] font-medium flex items-center gap-0.5">
-                          <Star className="w-2.5 h-2.5 fill-current" />
-                          Главное
-                        </span>
-                      )}
-                      <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover/img:opacity-100 transition-opacity">
-                        <button
-                          type="button"
-                          onClick={() => setMainImage(idx)}
-                          title="Сделать главным"
-                          className="w-5 h-5 bg-muted hover:bg-amber-500 rounded-full flex items-center justify-center text-muted-foreground hover:text-white cursor-pointer"
-                        >
-                          <Star className="w-3 h-3" />
-                        </button>
+                      <div className="relative w-full h-32 bg-muted">
+                        <img
+                          src={
+                            img.url.startsWith("blob:")
+                              ? img.url
+                              : getImageUrl(img.url)
+                          }
+                          alt=""
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            const wrapper = e.currentTarget.closest("[class*='relative']");
+                            if (wrapper instanceof HTMLElement) wrapper.style.display = "none";
+                          }}
+                        />
                         <button
                           type="button"
                           onClick={() => removeImage(idx)}
-                          className="w-5 h-5 bg-destructive rounded-full flex items-center justify-center text-white cursor-pointer"
+                          className="absolute top-1 right-1 w-5 h-5 bg-destructive rounded-full flex items-center justify-center text-white cursor-pointer"
                         >
                           <X className="w-3 h-3" />
                         </button>
+                      </div>
+                      <div className="p-2 space-y-1.5">
+                        <Select
+                          value={img.type}
+                          onValueChange={(val) => updateImageField(idx, { type: val })}
+                        >
+                          <SelectTrigger className="h-7 text-xs bg-muted/50">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PRODUCT_IMAGE_TYPES.map((t) => (
+                              <SelectItem key={t.value} value={t.value}>
+                                {t.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          value={img.title || ""}
+                          onChange={(e) => updateImageField(idx, { title: e.target.value })}
+                          placeholder="Заголовок"
+                          className="h-7 text-xs bg-muted/50"
+                        />
+                        <Input
+                          value={img.description || ""}
+                          onChange={(e) => updateImageField(idx, { description: e.target.value })}
+                          placeholder="Описание"
+                          className="h-7 text-xs bg-muted/50"
+                        />
                       </div>
                     </div>
                   ))}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { deleteCategory, restoreCategory, getCategories } from "@/lib/api";
+import { deleteCategory, restoreCategory, getCategories, getImageUrl } from "@/lib/api";
 import { useCategories, invalidateCategories } from "@/lib/swr";
 import { useDebounce } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -155,6 +155,7 @@ export default function CategoriesPage() {
               <TableHead>Имя</TableHead>
               <TableHead>Slug</TableHead>
               <TableHead>Описание</TableHead>
+              <TableHead className="w-16">Фото</TableHead>
               <TableHead className="w-24">ParentID</TableHead>
               <TableHead className="w-24 text-right">Действия</TableHead>
             </TableRow>
@@ -163,7 +164,7 @@ export default function CategoriesPage() {
             {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 6 }).map((_, j) => (
+                  {Array.from({ length: 7 }).map((_, j) => (
                     <TableCell key={j}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
@@ -173,7 +174,7 @@ export default function CategoriesPage() {
             ) : categories.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={6}
+                  colSpan={7}
                   className="text-center text-muted-foreground py-12"
                 >
                   Категории не найдены
@@ -195,6 +196,35 @@ export default function CategoriesPage() {
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm max-w-[200px] truncate">
                     {cat.description || "—"}
+                  </TableCell>
+                  <TableCell>
+                    {cat.images?.length > 0 ? (
+                      <div className="flex -space-x-1">
+                        {cat.images.slice(0, 3).map((img, i) => (
+                          <div
+                            key={i}
+                            className="w-7 h-7 rounded-md bg-muted border-2 border-card overflow-hidden"
+                          >
+                            <img
+                              src={getImageUrl(img.url)}
+                              alt=""
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                const wrapper = e.currentTarget.closest("div");
+                                if (wrapper) wrapper.style.display = "none";
+                              }}
+                            />
+                          </div>
+                        ))}
+                        {cat.images.length > 3 && (
+                          <div className="w-7 h-7 rounded-md bg-muted border-2 border-card flex items-center justify-center text-[10px] text-muted-foreground">
+                            +{cat.images.length - 3}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">—</span>
+                    )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {cat.parentId || "—"}
