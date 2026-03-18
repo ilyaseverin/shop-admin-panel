@@ -19,6 +19,8 @@ export interface Product {
   slug: string;
   sku?: string;
   description?: string;
+  shortDescription?: string;
+  technicalDescription?: string;
   price: number;
   categoryId: number;
   sortOrder: number;
@@ -38,6 +40,8 @@ export interface ProductForm {
   slug: string;
   sku: string;
   description: string;
+  shortDescription: string;
+  technicalDescription: string;
   price: string;
   categoryId: string;
   sortOrder: string;
@@ -49,6 +53,8 @@ export const emptyProductForm: ProductForm = {
   slug: "",
   sku: "",
   description: "",
+  shortDescription: "",
+  technicalDescription: "",
   price: "",
   categoryId: "",
   sortOrder: "",

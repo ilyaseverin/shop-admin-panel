@@ -95,7 +95,9 @@ export async function createCategory(data: {
   name: string;
   slug: string;
   fullName?: string;
+  shortDescription?: string;
   description?: string;
+  icon?: string;
   parentId?: number;
   sortOrder?: number;
 }) {
@@ -113,7 +115,9 @@ export async function updateCategory(
     name?: string;
     slug?: string;
     fullName?: string;
+    shortDescription?: string;
     description?: string;
+    icon?: string;
     parentId?: number;
     sortOrder?: number;
   },
@@ -199,6 +203,8 @@ export async function createProduct(data: {
   fullName?: string;
   sku?: string;
   description?: string;
+  shortDescription?: string;
+  technicalDescription?: string;
   sortOrder?: number;
   variantGroups?: {
     name: string;
@@ -231,6 +237,8 @@ export async function updateProduct(
     fullName?: string;
     sku?: string;
     description?: string;
+    shortDescription?: string;
+    technicalDescription?: string;
     sortOrder?: number;
   },
 ) {

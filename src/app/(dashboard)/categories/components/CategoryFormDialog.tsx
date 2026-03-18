@@ -89,7 +89,9 @@ export function CategoryFormDialog({
         name: category.name || "",
         fullName: category.fullName || "",
         slug: category.slug || "",
+        shortDescription: category.shortDescription || "",
         description: category.description || "",
+        icon: category.icon || "",
         parentId: category.parentId ? String(category.parentId) : "",
         sortOrder: "",
       });
@@ -224,7 +226,9 @@ export function CategoryFormDialog({
         name: form.name,
         slug: form.slug,
         fullName: form.fullName || undefined,
+        shortDescription: form.shortDescription || undefined,
         description: form.description || undefined,
+        icon: form.icon || undefined,
         parentId:
           form.parentId && form.parentId !== "0"
             ? Number(form.parentId)
@@ -393,6 +397,16 @@ export function CategoryFormDialog({
             />
           </div>
           <div className="space-y-2">
+            <Label>Краткое описание</Label>
+            <Textarea
+              value={form.shortDescription}
+              onChange={(e) => updateField("shortDescription", e.target.value)}
+              placeholder="Краткое описание категории..."
+              className="bg-muted/50 resize-none"
+              rows={2}
+            />
+          </div>
+          <div className="space-y-2">
             <Label>Описание</Label>
             <Textarea
               value={form.description}
@@ -401,6 +415,27 @@ export function CategoryFormDialog({
               className="bg-muted/50 resize-none"
               rows={3}
             />
+          </div>
+          <div className="space-y-2">
+            <Label>Иконка</Label>
+            <Input
+              value={form.icon}
+              onChange={(e) => updateField("icon", e.target.value)}
+              placeholder='SVG-код, URL или CSS-класс (например: <svg ...> или icon-frame-4)'
+              className="bg-muted/50"
+            />
+            {form.icon && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>Превью:</span>
+                {form.icon.trimStart().startsWith("<svg") ? (
+                  <span dangerouslySetInnerHTML={{ __html: form.icon }} className="[&>svg]:w-6 [&>svg]:h-6" />
+                ) : form.icon.startsWith("http") || form.icon.startsWith("/") ? (
+                  <img src={form.icon} alt="" className="w-6 h-6" />
+                ) : (
+                  <i className={form.icon} />
+                )}
+              </div>
+            )}
           </div>
 
           {/* Image Upload Section */}

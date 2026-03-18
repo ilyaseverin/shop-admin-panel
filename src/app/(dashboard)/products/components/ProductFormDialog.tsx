@@ -140,6 +140,8 @@ export function ProductFormDialog({
         sku: product.sku || "",
         slug: product.slug || "",
         description: product.description || "",
+        shortDescription: product.shortDescription || "",
+        technicalDescription: product.technicalDescription || "",
         price: String(product.price ?? ""),
         categoryId: String(product.categoryId ?? ""),
         sortOrder: String(product.sortOrder ?? ""),
@@ -375,6 +377,8 @@ export function ProductFormDialog({
         fullName: form.fullName || undefined,
         sku: form.sku || undefined,
         description: form.description || undefined,
+        shortDescription: form.shortDescription || undefined,
+        technicalDescription: form.technicalDescription || undefined,
         sortOrder: form.sortOrder ? Number(form.sortOrder) : undefined,
       };
 
@@ -606,13 +610,37 @@ export function ProductFormDialog({
             />
           </div>
           <div className="space-y-2">
+            <Label>Краткое описание</Label>
+            <Textarea
+              value={form.shortDescription}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, shortDescription: e.target.value }))
+              }
+              placeholder="Краткое описание для карточки товара..."
+              className="bg-muted/50 resize-none"
+              rows={2}
+            />
+          </div>
+          <div className="space-y-2">
             <Label>Описание</Label>
             <Textarea
               value={form.description}
               onChange={(e) =>
                 setForm((f) => ({ ...f, description: e.target.value }))
               }
-              placeholder="Описание товара..."
+              placeholder="Полное описание товара..."
+              className="bg-muted/50 resize-none"
+              rows={3}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Техническое описание</Label>
+            <Textarea
+              value={form.technicalDescription}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, technicalDescription: e.target.value }))
+              }
+              placeholder="Материал, размеры, вес и другие характеристики..."
               className="bg-muted/50 resize-none"
               rows={3}
             />

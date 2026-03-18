@@ -15,7 +15,9 @@ export interface Category {
   name: string;
   fullName: string;
   slug: string;
+  shortDescription?: string;
   description: string;
+  icon?: string;
   parentId: number;
   images: CategoryImage[];
   deletedAt?: string;
@@ -25,7 +27,9 @@ export interface CategoryForm {
   name: string;
   fullName: string;
   slug: string;
+  shortDescription: string;
   description: string;
+  icon: string;
   parentId: string;
   sortOrder: string;
 }
@@ -34,7 +38,9 @@ export const emptyCategoryForm: CategoryForm = {
   name: "",
   fullName: "",
   slug: "",
+  shortDescription: "",
   description: "",
+  icon: "",
   parentId: "",
   sortOrder: "",
 };
